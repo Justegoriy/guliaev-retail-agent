@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# Secrets
+.env
+*.json.key
+service-account*.json
+
+# Runtime data
+data/app.db
+data/checkpoints.db
+data/*.db-*
+data/golden_index.npz
+data/golden_candidates.jsonl
+data/schema_cache.json
+exports/
+logs/
+evals/results/
+
+# IDE
+.idea/
+.vscode/
