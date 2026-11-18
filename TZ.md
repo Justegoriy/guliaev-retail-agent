@@ -59,7 +59,7 @@
 
 | Таблица | Ключевые поля | Примечания |
 |---|---|---|
-| `users` | `id`, `first_name`, `last_name`, `email`, `age`, `gender`, `state`, `street_address`, `postal_code`, `city`, `country`, `latitude`, `longitude`, `traffic_source`, `created_at` | **Содержит PII** |
+| `users` | `id`, `first_name`, `last_name`, `email`, `age`, `gender`, `state`, `street_address`, `postal_code`, `city`, `country`, `latitude`, `longitude`, `traffic_source`, `created_at`, `user_geom` | **Содержит PII** |
 | `orders` | `order_id`, `user_id`, `status`, `gender`, `created_at`, `returned_at`, `shipped_at`, `delivered_at`, `num_of_item` | |
 | `order_items` | `id`, `order_id`, `user_id`, `product_id`, `inventory_item_id`, `status`, `created_at`, `shipped_at`, `delivered_at`, `returned_at`, `sale_price` | Источник выручки |
 | `products` | `id`, `cost`, `category`, `name`, `brand`, `retail_price`, `department`, `sku`, `distribution_center_id` | Основа для разграничения доступа по продуктам |
@@ -69,7 +69,7 @@
 - [PROTO] Используется существующий `bq_client.py` (`BigQueryRunner`), при необходимости его нужно доработать: dry-run, `maximum_bytes_billed`, таймауты, метки запросов.
 - [PROTO] Агент умеет отвечать на вопросы о структуре БД: какие таблицы и поля есть, какие анализы возможны. Схема берётся через `get_table_schema` и кэшируется.
 - Доступ только на чтение: любой не-`SELECT` запрос (DML/DDL) отклоняется ещё до отправки в BigQuery.
-- Перед финальной фиксацией схемы колонки нужно сверить с реальной схемой через `get_table_schema`.
+- Перед финальной фиксацией схемы колонки нужно сверить с реальной схемой через `get_table_schema`. → Сверено 18.11.2026: совпадает, в `users` есть ещё `user_geom` (GEOGRAPHY, PII). `department` ∈ {Men, Women}; статусы: Processing, Shipped, Complete, Returned, Cancelled; датасет обновляется ежедневно (последние заказы — текущая дата).
 
 ### 2.2. Golden Knowledge Bucket (теоретический)
 Data lake с историческими «Trios»: **Question → SQL Query → Analyst Report**, составленными людьми-экспертами.

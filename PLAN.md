@@ -182,17 +182,19 @@ class QueryResult:                      # bigquery
 
 **Файлы:** `data/bigquery.py`, `knowledge/schema.py`, `tests/test_bigquery.py`.
 
-- [ ] Перенести `BigQueryRunner`, добавить:
+- [x] Перенести `BigQueryRunner`, добавить:
   - `dry_run(sql) -> int` (bytes). Ошибка BigQuery → `SqlInvalid(message)` с очищенным текстом ошибки (без URL и job id).
   - `execute(sql) -> QueryResult`: `QueryJobConfig(maximum_bytes_billed=..., use_query_cache=True, labels={"app": "retail_agent"})`, `job.result(timeout=...)`.
   - Retry через `tenacity` только на транзиентные ошибки (`ServiceUnavailable`, `InternalServerError`, `TooManyRequests`, `DeadlineExceeded`, сетевые): 3 попытки, exponential backoff + jitter. `BadRequest` не ретраится. После исчерпания → `ServiceUnavailable("bigquery")`.
   - In-memory кэш результатов (`dict` на SQL-текст после переписывания, TTL 10 мин, ≤ 100 записей).
   - Логирование `sql_dry_run` / `sql_executed` (bytes, duration, rows, cache_hit) — без данных.
-- [ ] `schema.py`: при старте загрузить схему четырёх таблиц через `get_table_schema`, кэш в памяти (+ файл `data/schema_cache.json` для экономии и офлайн-старта). Дополнить ручными описаниями ключевых колонок (статусы заказа, что `sale_price` = выручка позиции, связи таблиц). Пометить PII-колонки из `pii_policy.yaml`. `schema_prompt() -> str` — компактное описание для system prompt; `describe() -> str` — подробное для пользователя.
-- [ ] Сверить реальную схему с `TZ.md` §2.1 и значения `products.department` (`SELECT DISTINCT department`), поправить TZ/конфиги при расхождении.
-- [ ] Тесты: retry-логика и маппинг ошибок с замоканным клиентом.
+- [x] `schema.py`: при старте загрузить схему четырёх таблиц через `get_table_schema`, кэш в памяти (+ файл `data/schema_cache.json` для экономии и офлайн-старта). Дополнить ручными описаниями ключевых колонок (статусы заказа, что `sale_price` = выручка позиции, связи таблиц). Пометить PII-колонки из `pii_policy.yaml`. `schema_prompt() -> str` — компактное описание для system prompt; `describe() -> str` — подробное для пользователя.
+- [x] Сверить реальную схему с `TZ.md` §2.1 и значения `products.department` (`SELECT DISTINCT department`), поправить TZ/конфиги при расхождении.
+- [x] Тесты: retry-логика и маппинг ошибок с замоканным клиентом.
 
-**Готово, когда:** скрипт-проверка выполняет `SELECT COUNT(*) FROM orders` через runner, dry-run на кривом SQL отдаёт `SqlInvalid`.
+→ Сделано: `errors.py` (доменные ошибки), `config/pii_policy.yaml` + `pii.pii_columns()`, `bq_client.py` удалён (перенесён). Локальный таймаут запроса не ретраится (отмена job → `ServiceUnavailable`); 403 `rateLimitExceeded` ретраится; dry-run сразу проверяет `BQ_MAX_BYTES_BILLED`. Кэш схемы обновляется раз в 7 дней, при недоступности BigQuery берётся устаревший.
+
+**Готово, когда:** скрипт-проверка (`scripts/check_bigquery.py`) выполняет `SELECT COUNT(*) FROM orders` через runner, dry-run на кривом SQL отдаёт `SqlInvalid`.
 
 ---
 
