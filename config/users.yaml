@@ -1,0 +1,22 @@
+# Demo users for the prototype (D4). In production identity comes from SSO,
+# and role/departments from the corporate directory.
+#
+# role:
+#   ceo, c_level - full access to all departments
+#   executive    - access only to the listed `departments` (products.department);
+#                  other departments are visible only as anonymised company-wide aggregates
+users:
+  ceo:
+    name: Alice Morgan
+    role: ceo
+  cfo:
+    name: Brian Chen
+    role: c_level
+  head_men:
+    name: Carlos Ruiz
+    role: executive
+    departments: [Men]
+  head_women:
+    name: Diana Novak
+    role: executive
+    departments: [Women]

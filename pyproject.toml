@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "retail-agent"
+version = "0.1.0"
+description = "Conversational retail analytics agent over BigQuery thelook_ecommerce"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=1.2,<2",
+    "langgraph-checkpoint-sqlite>=3.1,<4",
+    "langchain-core>=1.8,<2",
+    "langchain-google-genai>=4.5,<5",
+    "langsmith>=0.15,<1",
+    "google-cloud-bigquery>=3.47,<4",
+    "db-dtypes>=1.9,<2",
+    "pandas>=3.1,<4",
+    "sqlglot>=30.33,<31",
+    "pydantic-settings>=2.16,<3",
+    "pyyaml>=6.0,<7",
+    "rich>=15,<16",
+    "prompt_toolkit>=3.0.53,<4",
+    "tenacity>=9.1,<9.2",
+    "numpy>=2.5,<3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=9.2,<10", "ruff>=0.17,<0.18"]
+
+[project.scripts]
+retail-agent = "retail_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+include = ["src/**/*.py", "tests/**/*.py", "scripts/**/*.py", "evals/**/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = ["network: needs real BigQuery/Gemini access (deselect with -m 'not network')"]
