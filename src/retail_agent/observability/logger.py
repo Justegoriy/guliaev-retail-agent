@@ -40,7 +40,7 @@ def new_trace_id() -> str:
 
 def _mask(value: Any) -> Any:
     if isinstance(value, str):
-        return pii.mask_text(value)
+        return pii.mask_text(value)[0]
     if isinstance(value, dict):
         return {k: _mask(v) for k, v in value.items()}
     if isinstance(value, list | tuple | set):

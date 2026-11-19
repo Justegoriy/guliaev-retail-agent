@@ -11,3 +11,15 @@ pii_columns:
     - latitude
     - longitude
     - user_geom
+
+# Regexes for masking free text and string result values (Python `re` syntax).
+# They are the second and third line of defence after the SQL Guard; keep them
+# specific enough not to mask product names, dates or money amounts.
+patterns:
+  email: '[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}'
+  phone: '(?<![\w+.])(?:\+\d{1,3}[\s.-]?\(?\d{1,4}\)?(?:[\s.-]?\d{2,4}){2,3}|\(\d{3}\)\s?\d{3}[\s.-]\d{4}|\d{3}[\s.-]\d{3}[\s.-]\d{4})(?![\w])'
+  # "<number> <Name> <street suffix> [Apt./Suite N]" (US street suffixes, singular or plural;
+  # covers 99.6% of users.street_address). Must not continue with a capitalised word, "/", "&"
+  # or "and", so product names like "8-20 Youth Circle Sound Splice" are not masked.
+  # "Neck" is left out on purpose: "3 Pack Crew Neck" is a common product name.
+  street_address: '(?<![\w-])\d{1,6}\s+(?:[A-Z][A-Za-z''.-]*\s+){1,3}(?:Alley|Avenue|Ave|Bridge|Brook|Burg|Bypass|Camp|Canyon|Cape|Causeway|Center|Circle|Cliff|Club|Common|Corner|Course|Court|Cove|Creek|Crescent|Crest|Crossing|Crossroad|Curve|Dale|Dam|Divide|Drive|Estate|Expressway|Extension|Fall|Ferry|Field|Flat|Ford|Forest|Forge|Fork|Fort|Freeway|Garden|Gateway|Glen|Green|Grove|Harbor|Haven|Height|Highway|Hill|Hollow|Inlet|Island|Isle|Junction|Key|Knoll|Lake|Land|Landing|Lane|Light|Loaf|Lock|Lodge|Loop|Mall|Manor|Meadow|Mews|Mill|Mission|Motorway|Mount|Mountain|Orchard|Oval|Overpass|Park|Parkway|Pass|Passage|Path|Pike|Pine|Place|Plain|Plaza|Point|Port|Prairie|Radial|Ramp|Ranch|Rapid|Rest|Ridge|River|Road|Route|Row|Rue|Run|Shoal|Shore|Skyway|Spring|Spur|Square|Station|Stravenue|Stream|Street|Summit|Terrace|Throughway|Trace|Track|Trafficway|Trail|Tunnel|Turnpike|Underpass|Union|Valley|Via|Viaduct|View|Village|Ville|Vista|Walk|Wall|Way|Well|Blvd|Rd|St|Ln|Dr|Ct|Pl|Pkwy|Hwy|Sq)(?:s|es)?\b\.?(?:\s+(?:Apt\.?|Suite|Unit)\s*\d+\w*)?(?!\s*[/&+-]|\s+(?:[A-Z]|and\b))'

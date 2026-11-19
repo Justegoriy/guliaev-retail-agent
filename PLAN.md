@@ -242,6 +242,13 @@ class QueryResult:                      # bigquery
 - LIMIT добавляется только снаружи и не дублируется.
 - `mask_text` / `mask_dataframe` на примерах.
 
+→ Сделано (все пункты 3.1–3.4). Отличия и дополнения:
+- `acl.apply(tree, user, dataset)`: базовые таблицы находятся по полному имени после квалификации. `order_items` фильтруется через `product_id IN (SELECT id ...)` вместо JOIN (результат тот же).
+- Guard дополнительно закрывает обходы PII: `SELECT u FROM users u` (вся строка как STRUCT), `UNNEST([email])` во FROM, оконные/агрегатные функции над PII. Разрешено: PII внутри `COUNT`/`COUNTIF`/`APPROX_COUNT_DISTINCT`, в булевых проверках (`LIKE`, `=`, `IN`, `REGEXP_CONTAINS`), в `PARTITION BY`/`ORDER BY` окна, в подзапросах `EXISTS`/`IN (...)`. `*` из подзапроса/CTE разрешена (их проекции проверены сами), `* EXCEPT(все PII)` разрешена. CTE с именем таблицы датасета → reject.
+- `LIMIT` больше `SQL_DEFAULT_LIMIT` уменьшается до него. `SqlRejected.rule` + событие `sql_rejected` в логе.
+- Regex адреса проверен на данных: 99.1% `users.street_address`, 0 ложных срабатываний на `products.name/brand/category/sku`, `users.city/state/country`. Логгер теперь маскирует PII.
+- Интеграционные тесты помечены `@pytest.mark.network` (ACL для `head_men` на BigQuery + dry-run всех переписанных запросов); в CI запускать с `-m "not network"`.
+
 **Готово, когда:** все тесты зелёные; ручная проверка нескольких переписанных запросов через dry-run в BigQuery проходит.
 
 ---

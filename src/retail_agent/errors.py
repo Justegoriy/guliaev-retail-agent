@@ -14,6 +14,10 @@ class SqlRejected(AgentError):
 
     user_message = "This query is not allowed."
 
+    def __init__(self, message: str, rule: str = "policy"):
+        self.rule = rule
+        super().__init__(message)
+
 
 class SqlInvalid(AgentError):
     """BigQuery rejected the query (syntax error, unknown column...)."""

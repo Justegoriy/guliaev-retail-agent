@@ -21,7 +21,7 @@ def test_log_event_writes_json_with_context(tmp_path):
 
 
 def test_strings_are_masked(tmp_path, monkeypatch):
-    monkeypatch.setattr(logger.pii, "mask_text", lambda s: s.replace("secret", "***"))
+    monkeypatch.setattr(logger.pii, "mask_text", lambda s: (s.replace("secret", "***"), 1))
     path = tmp_path / "agent.jsonl"
     logger.configure(path)
 
