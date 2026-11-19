@@ -1,11 +1,11 @@
 # Demo users for the prototype (D4). In production identity comes from SSO,
-# and role/categories from the corporate directory.
+# and role/access scope from the corporate directory.
 #
 # role:
 #   ceo, c_level - full access to all product categories
-#   executive    - category manager: access only to the listed `categories`
-#                  (products.category); other categories are visible only as
-#                  anonymised company-wide aggregates
+#   executive    - product manager: access only to the listed `category_groups`
+#                  (and optionally individual `categories`); everything else is
+#                  visible only as anonymised company-wide aggregates
 users:
   ceo:
     name: Alice Morgan
@@ -13,41 +13,50 @@ users:
   cfo:
     name: Brian Chen
     role: c_level
-  jeans_manager:
+  bottoms_manager:
     name: Carlos Ruiz
     role: executive
-    categories: [Jeans]
+    category_groups: [Bottoms]
   outerwear_manager:
     name: Diana Novak
     role: executive
-    categories: [Outerwear & Coats, Blazers & Jackets]
+    category_groups: [Outerwear & Tailoring]
 
-# Valid values of products.category (checked 2026-11-19). A user's categories must be
-# from this list, so a typo cannot silently give an empty scope.
-categories:
-  - Accessories
-  - Active
-  - Blazers & Jackets
-  - Clothing Sets
-  - Dresses
-  - Fashion Hoodies & Sweatshirts
-  - Intimates
-  - Jeans
-  - Jumpsuits & Rompers
-  - Leggings
-  - Maternity
-  - Outerwear & Coats
-  - Pants
-  - Pants & Capris
-  - Plus
-  - Shorts
-  - Skirts
-  - Sleep & Lounge
-  - Socks
-  - Socks & Hosiery
-  - Suits
-  - Suits & Sport Coats
-  - Sweaters
-  - Swim
-  - Tops & Tees
-  - Underwear
+# Product category groups -> products.category values (26 categories, checked 2026-11-19).
+# Every category belongs to exactly one group; this is also the list of valid categories,
+# so a typo in a user's scope fails at start-up instead of silently granting nothing.
+category_groups:
+  Outerwear & Tailoring:
+    - Outerwear & Coats
+    - Blazers & Jackets
+    - Suits & Sport Coats
+    - Suits
+  Tops:
+    - Tops & Tees
+    - Sweaters
+    - Fashion Hoodies & Sweatshirts
+  Bottoms:
+    - Jeans
+    - Pants
+    - Pants & Capris
+    - Shorts
+    - Skirts
+    - Leggings
+  Dresses & Sets:
+    - Dresses
+    - Jumpsuits & Rompers
+    - Clothing Sets
+  Underwear & Loungewear:
+    - Intimates
+    - Underwear
+    - Socks
+    - Socks & Hosiery
+    - Sleep & Lounge
+  Active & Swim:
+    - Active
+    - Swim
+  Special Sizes:
+    - Maternity
+    - Plus
+  Accessories:
+    - Accessories

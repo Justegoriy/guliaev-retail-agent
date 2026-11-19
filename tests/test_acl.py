@@ -136,8 +136,18 @@ def bq_runner():
     return BigQueryRunner.from_settings(get_settings())
 
 
+def test_category_group_expands_to_its_categories():
+    from retail_agent.auth import load_user
+
+    sql = guard("SELECT id FROM products", load_user("bottoms_manager")).sql
+    assert "category IN ('Jeans', 'Leggings', 'Pants', 'Pants & Capris', 'Shorts', 'Skirts')" in sql
+
+
 @pytest.mark.network
-def test_jeans_manager_sees_only_jeans_in_bigquery():
+def test_group_manager_sees_only_group_categories_in_bigquery():
+    from retail_agent.auth import load_user
+
+    user = load_user("bottoms_manager")
     runner = bq_runner()
     queries = [
         "SELECT DISTINCT category FROM products",
@@ -145,8 +155,8 @@ def test_jeans_manager_sees_only_jeans_in_bigquery():
         "JOIN `bigquery-public-data.thelook_ecommerce.products` p ON p.id = oi.product_id",
     ]
     for sql in queries:
-        assert set(runner.execute(guard(sql, JEANS).sql).df["category"]) == {"Jeans"}
-    rewritten = guard("SELECT COUNT(*) AS n FROM products WHERE category = 'Swim'", JEANS)
+        assert set(runner.execute(guard(sql, user).sql).df["category"]) == set(user.categories)
+    rewritten = guard("SELECT COUNT(*) AS n FROM products WHERE category = 'Swim'", user)
     assert int(runner.execute(rewritten.sql).df["n"][0]) == 0
 
 
