@@ -14,4 +14,4 @@ gcloud auth application-default login
 python -m retail_agent --user ceo
 ```
 
-Demo users: `ceo`, `cfo`, `head_men`, `head_women` (see `config/users.yaml`).
+Demo users: `ceo`, `cfo`, `jeans_manager`, `outerwear_manager` (see `config/users.yaml`).

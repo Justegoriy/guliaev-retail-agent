@@ -10,7 +10,7 @@ def test_log_event_writes_json_with_context(tmp_path):
     logger.conversation_id_var.set("conv1")
     trace_id = logger.new_trace_id()
 
-    logger.log_event("session_start", role="ceo", departments=[])
+    logger.log_event("session_start", role="ceo", categories=[])
 
     record = json.loads(path.read_text(encoding="utf-8").splitlines()[-1])
     assert record["event"] == "session_start"

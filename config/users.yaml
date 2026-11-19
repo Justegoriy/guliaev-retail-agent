@@ -1,10 +1,11 @@
 # Demo users for the prototype (D4). In production identity comes from SSO,
-# and role/departments from the corporate directory.
+# and role/categories from the corporate directory.
 #
 # role:
-#   ceo, c_level - full access to all departments
-#   executive    - access only to the listed `departments` (products.department);
-#                  other departments are visible only as anonymised company-wide aggregates
+#   ceo, c_level - full access to all product categories
+#   executive    - category manager: access only to the listed `categories`
+#                  (products.category); other categories are visible only as
+#                  anonymised company-wide aggregates
 users:
   ceo:
     name: Alice Morgan
@@ -12,11 +13,41 @@ users:
   cfo:
     name: Brian Chen
     role: c_level
-  head_men:
+  jeans_manager:
     name: Carlos Ruiz
     role: executive
-    departments: [Men]
-  head_women:
+    categories: [Jeans]
+  outerwear_manager:
     name: Diana Novak
     role: executive
-    departments: [Women]
+    categories: [Outerwear & Coats, Blazers & Jackets]
+
+# Valid values of products.category (checked 2026-11-19). A user's categories must be
+# from this list, so a typo cannot silently give an empty scope.
+categories:
+  - Accessories
+  - Active
+  - Blazers & Jackets
+  - Clothing Sets
+  - Dresses
+  - Fashion Hoodies & Sweatshirts
+  - Intimates
+  - Jeans
+  - Jumpsuits & Rompers
+  - Leggings
+  - Maternity
+  - Outerwear & Coats
+  - Pants
+  - Pants & Capris
+  - Plus
+  - Shorts
+  - Skirts
+  - Sleep & Lounge
+  - Socks
+  - Socks & Hosiery
+  - Suits
+  - Suits & Sport Coats
+  - Sweaters
+  - Swim
+  - Tops & Tees
+  - Underwear

@@ -10,7 +10,6 @@ from retail_agent.settings import CONFIG_DIR
 
 Role = Literal["ceo", "c_level", "executive"]
 FULL_ACCESS_ROLES: frozenset[str] = frozenset({"ceo", "c_level"})
-DEPARTMENTS: frozenset[str] = frozenset({"Men", "Women"})
 USERS_FILE = CONFIG_DIR / "users.yaml"
 
 
@@ -23,39 +22,39 @@ class UserContext:
     user_id: str
     name: str
     role: Role
-    departments: tuple[str, ...] = ()
+    categories: tuple[str, ...] = ()
 
     @property
     def has_full_access(self) -> bool:
         return self.role in FULL_ACCESS_ROLES
 
-    def can_access(self, department: str) -> bool:
-        return self.has_full_access or department in self.departments
+    def can_access(self, category: str) -> bool:
+        return self.has_full_access or category in self.categories
 
     @property
     def scope_label(self) -> str:
-        return "all departments" if self.has_full_access else ", ".join(self.departments)
+        return "all categories" if self.has_full_access else ", ".join(self.categories)
 
 
-def _parse_user(user_id: str, raw: dict) -> UserContext:
+def _parse_user(user_id: str, raw: dict, known_categories: frozenset[str]) -> UserContext:
     if not isinstance(raw, dict):
         raise UserConfigError(f"User '{user_id}': expected a mapping, got {type(raw).__name__}")
     role = raw.get("role")
     if role not in get_args(Role):
         raise UserConfigError(f"User '{user_id}': unknown role {role!r}")
-    departments = tuple(raw.get("departments") or ())
-    unknown = set(departments) - DEPARTMENTS
+    categories = tuple(str(c) for c in raw.get("categories") or ())
+    unknown = set(categories) - known_categories
     if unknown:
-        raise UserConfigError(f"User '{user_id}': unknown departments {sorted(unknown)}")
-    if role == "executive" and not departments:
-        raise UserConfigError(f"User '{user_id}': executive must have at least one department")
+        raise UserConfigError(f"User '{user_id}': unknown categories {sorted(unknown)}")
+    if role == "executive" and not categories:
+        raise UserConfigError(f"User '{user_id}': executive must have at least one category")
     if role in FULL_ACCESS_ROLES:
-        departments = ()
+        categories = ()
     return UserContext(
         user_id=user_id,
         name=str(raw.get("name") or user_id),
         role=role,
-        departments=departments,
+        categories=categories,
     )
 
 
@@ -67,7 +66,10 @@ def load_users(path: Path = USERS_FILE) -> dict[str, UserContext]:
     raw_users = data.get("users")
     if not isinstance(raw_users, dict) or not raw_users:
         raise UserConfigError(f"{path}: 'users' must be a non-empty mapping")
-    return {str(uid): _parse_user(str(uid), raw) for uid, raw in raw_users.items()}
+    known_categories = frozenset(str(c) for c in data.get("categories") or ())
+    return {
+        str(uid): _parse_user(str(uid), raw, known_categories) for uid, raw in raw_users.items()
+    }
 
 
 def load_user(user_id: str, path: Path = USERS_FILE) -> UserContext:

@@ -200,7 +200,7 @@ def test_tables_are_fully_qualified_and_keep_alias():
 
 def test_ceo_query_has_no_acl_filter():
     result = guard("SELECT category FROM products")
-    assert "department" not in result.sql
+    assert "WHERE" not in result.sql
 
 
 def test_limit_is_added_to_outer_query_only():

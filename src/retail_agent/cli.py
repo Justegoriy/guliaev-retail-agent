@@ -23,7 +23,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="retail-agent", description="Chat with your retail data in plain language."
     )
-    parser.add_argument("--user", help="demo user id from config/users.yaml (e.g. ceo, head_men)")
+    parser.add_argument(
+        "--user", help="demo user id from config/users.yaml (e.g. ceo, jeans_manager)"
+    )
     parser.add_argument("--debug", action="store_true", help="print log events to stderr")
     return parser.parse_args(argv)
 
@@ -91,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
 
     logger.user_id_var.set(user.user_id)
     logger.conversation_id_var.set(uuid.uuid4().hex)
-    log_event("session_start", role=user.role, departments=list(user.departments))
+    log_event("session_start", role=user.role, categories=list(user.categories))
     try:
         _repl(user)
     finally:
