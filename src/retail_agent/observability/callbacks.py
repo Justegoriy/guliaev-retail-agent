@@ -153,10 +153,11 @@ class ObservabilityCallbackHandler(BaseCallbackHandler):
         input_str: str,
         *,
         run_id: UUID,
+        metadata: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         name = (serialized or {}).get("name") or kwargs.get("name") or "?"
-        self._runs[run_id] = _Run(name=str(name), args=clip(input_str))
+        self._runs[run_id] = _Run(name=str(name), args=clip(input_str), metadata=metadata or {})
 
     def on_tool_end(self, output: Any, *, run_id: UUID, **kwargs: Any) -> None:
         run = self._runs.pop(run_id, None)
@@ -170,6 +171,7 @@ class ObservabilityCallbackHandler(BaseCallbackHandler):
             latency_ms=run.latency_ms,
             args=run.args,
             result=clip(text if isinstance(text, str) else str(text)),
+            **_tool_flags(run),
         )
 
     def on_tool_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
@@ -185,8 +187,15 @@ class ObservabilityCallbackHandler(BaseCallbackHandler):
             args=run.args,
             error=type(error).__name__,
             detail=clip(str(error), MAX_ERROR_CHARS),
+            **_tool_flags(run),
         )
 
 
 def _call_id(run_id: UUID) -> str:
     return run_id.hex[:12]
+
+
+def _tool_flags(run: _Run) -> dict[str, Any]:
+    """Registry flags (`side_effects`, `requires_confirmation`) set in the tool's metadata."""
+    keys = ("side_effects", "requires_confirmation")
+    return {k: run.metadata[k] for k in keys if k in run.metadata}

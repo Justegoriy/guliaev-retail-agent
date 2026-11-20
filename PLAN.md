@@ -302,8 +302,8 @@ class ToolSpec:
 - Обёртка реестра автоматически добавляет логирование `tool_call` и проверку, что tool с `requires_confirmation=True` внутри вызвал `confirmation.require(...)` (иначе — ошибка при регистрации в тестах).
 - Добавление новой возможности (графики, email, web search) = новый модуль с `ToolSpec`, ядро не меняется.
 
-- [ ] `describe_dataset()` → `schema.describe()`: таблицы, ключевые поля (PII помечены как недоступные для вывода), связи, примеры вопросов, доступные пользователю категории.
-- [ ] `run_sql(sql: str, purpose: str)`:
+- [x] `describe_dataset()` → `schema.describe()`: таблицы, ключевые поля (PII помечены как недоступные для вывода), связи, примеры вопросов, доступные пользователю категории.
+- [x] `run_sql(sql: str, purpose: str)`:
   1. если `state.sql_failures >= MAX_SQL_FAILURES` → вернуть `"STOP: failure limit reached. Explain to the user what went wrong and suggest how to rephrase."`;
   2. `sql_guard.check_and_rewrite` → при `SqlRejected` вернуть `ERROR(rejected): <причина и как исправить>. Attempts left: N`;
   3. `dry_run` → при `SqlInvalid` вернуть `ERROR(syntax): <сообщение BQ>. Attempts left: N`; при превышении лимита байт на запрос **или** остатка бюджета хода (`TURN_MAX_BQ_BYTES` − уже потрачено в ходе) → `ERROR(too_expensive): ...add filters/aggregate`;
@@ -312,9 +312,17 @@ class ToolSpec:
   Счётчик неудач — в state через `Command(update=...)` из tool (LangGraph `InjectedToolCallId` + `Command`), либо в `ToolContext.turn` (объект, сбрасываемый в начале хода — проще, выбрать его).
   `ServiceUnavailable` → `ERROR(service): BigQuery unavailable, do not retry` — агент сообщает пользователю, ход не падает.
   Выполненные SQL сохраняются в `ctx.turn.executed_sql` (для `save_report.source_queries`).
-- [ ] `get_company_benchmark(metric: Literal["revenue","orders","avg_order_value","customers","items_sold","return_rate"], start_date: date, end_date: date, granularity: Literal["total","month"] = "total")`:
+- [x] `get_company_benchmark(metric: Literal["revenue","orders","avg_order_value","customers","items_sold","return_rate"], start_date: date, end_date: date, granularity: Literal["total","month"] = "total")`:
   фиксированные SQL-шаблоны **без ACL** и без разбивки по измерениям; даты валидируются pydantic. Описание tool явно говорит: «company-wide anonymized totals for benchmarking; no breakdown by category/product/customer».
   Для full-access пользователей tool тоже доступен (удобно), но не обязателен.
+
+→ Сделано. Отличия и дополнения:
+- Состояние хода — `ToolContext.turn` (`TurnState`: `sql_failures`, `bq_bytes`, `executed: list[ExecutedQuery]` с sql/purpose/rows/columns; `executed_sql` — свойство). Сброс `turn.reset()` в начале хода — задача графа (шаг 6). Счётчики под lock: ToolNode выполняет параллельные tool calls одного шага в потоках.
+- Бюджет хода: байты из dry-run резервируются до выполнения и пересчитываются по факту (`bytes_processed`, при попадании в кэш 0); при ошибке выполнения резерв возвращается.
+- Статусы: `ERROR(rejected|syntax|runtime|too_expensive)` и `EMPTY` считаются неудачами (`runtime` — ошибка BigQuery при выполнении, после успешного dry-run); `ERROR(service)` не считается. На последней попытке вместо `Attempts left: 0` — указание объяснить пользователю. Если результат упёрся в `SQL_DEFAULT_LIMIT`, добавляется предупреждение «агрегируй в SQL». CSV с `\n` (на Windows pandas по умолчанию пишет `\r\n`).
+- Benchmark: один фиксированный SQL по `order_items` считает все 6 метрик (повторные вызовы попадают в кэш runner), наружу отдаётся только запрошенная + её определение. Определения: «продажа» = позиция не `Cancelled`/`Returned`; revenue = SUM(sale_price) продаж; orders/customers — distinct среди продаж; AOV = revenue/orders; return_rate = Returned / не Cancelled. Даты валидирует pydantic (`end ≥ start`, период ≤ 10 лет), в SQL подставляются как `DATE 'YYYY-MM-DD'`. Benchmark-запрос идёт в бюджет хода и в `executed`, но не в счётчик неудач.
+- Реестр: `ToolRegistry` + глобальный `REGISTRY`, `build_tools(ctx, registry=REGISTRY)`. Логирование `tool_call` уже делает callback из шага 4, поэтому реестр не дублирует его, а кладёт `side_effects`/`requires_confirmation` в `tool.metadata` — они попадают в событие `tool_call`. Проверка вызова `confirmation.require` для `requires_confirmation=True` — на шаге 7 вместе с модулем `confirmation`.
+- Проверено на BigQuery: SQL benchmark (total/month) валиден, AOV = revenue/orders; tools под `bottoms_manager` видят 6 своих категорий, Swim → 0.
 
 **Готово, когда:** юнит-тесты с замоканным runner проверяют все ветки `run_sql` (rejected, syntax, expensive, бюджет хода исчерпан, empty, success, limit reached, service down); реестр отдаёт tools по ролям.
 
