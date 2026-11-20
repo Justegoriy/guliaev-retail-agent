@@ -388,6 +388,19 @@ START → input_guard ─(blocked)→ output_guard → END
 - `analysis_context` обновляется после хода с SQL и не меняется после разговорного хода;
 - введённый пользователем email не сохраняется в checkpoint.
 
+→ Сделано (6.1–6.6). Отличия и дополнения:
+- Сервисы сессии (`ToolContext`, tools, модели, источники промпта) лежат в `AgentDeps` и попадают в узлы через замыкание. В state нет `user`, `conversation_id` и `sql_failures`: счётчики хода — `TurnState` из шага 5, сбрасываются в узле `input_guard`, который при resume после interrupt повторно не выполняется. Добавлено поле `guard` (`GuardDecision`: category, reason, source, pii_request). Фасад для CLI — `AgentSession` (`run_turn`, `new_conversation`, `switch_conversation`, `state`), production-сборка — `create_session`.
+- System prompt собирается один раз за ход (кэш по `trace_id`). `persona.md` и `glossary.yaml` перечитываются по mtime, с событиями `persona_reloaded` / `glossary_reloaded` (хэш версии); событие `prompt_built` содержит версии persona и glossary, поэтому часть шага 8 про persona уже сделана. Блоки preferences и golden — пустые точки подключения до шагов 8–9.
+- В конце промпта каждый ход явно указывается язык ответа (D21), язык последнего сообщения определяется в коде: без этого модель на фоне английской истории отвечала по-английски. Fallback Flash-Lite всё равно иногда отвечает по-английски.
+- `analysis_context.sql` хранит SQL в виде, написанном моделью (после проверки Guard), а не ACL-переписанный: уточнение модифицирует читаемый запрос, а Guard заново применяет ACL. В `ExecutedQuery` добавлены `original_sql` и `source`; benchmark не меняет контекст анализа.
+- Модель видит все ещё не свёрнутые ходы (не больше `HISTORY_SUMMARIZE_AFTER_TURNS`), а не только `HISTORY_KEEP_TURNS`: иначе ходы 7–10 пропадали бы до суммаризации. Суммаризация оставляет `HISTORY_KEEP_TURNS` ходов. Tool calls без ответа (ход оборван лимитом шагов) отбрасываются. Если суммаризация не удалась, сообщения остаются, а история для модели всё равно ограничена.
+- Финальный ответ маскируется уже в узле `agent`, чтобы немаскированный текст не попал ни в один checkpoint. `output_guard` проверяет повторно и подменяет пустой ответ.
+- Input guard: injection и команды изменения данных блокируются правилами без вызова модели. Правила не срабатывают на «удали отчёт» и «убери товары без продаж из списка». Запрос PII («emails of top customers») пропускается с заметкой в промпте; слово «name» считается PII только в формах «customer names» / «names of … customers». Классификатор получает 3 последние пары реплик и тему анализа. Отказ по шаблону на языке вопроса.
+- Ошибки tools: невалидные аргументы → `ERROR(invalid_args)` (модель исправляет), прочие исключения → `ERROR(internal)`. `GraphInterrupt` ToolNode пропускает сам.
+- `build_chat_model(..., structured_output=Schema)` — для guard, извлечения контекста и summary.
+- CLI-заглушка подключена к графу: `turn_start` / `turn_end`, классификация ошибок, сообщение при лимите шагов, удаление BOM из stdin PowerShell.
+- Проверено вживую (`ceo` и `bottoms_manager`): «monthly revenue for 2024» → «а только для категории Jeans?» — второй запрос тот же SQL плюс `p.category = 'Jeans'`, цифры Jeans у обоих пользователей совпадают; injection блокируется правилом. Gemini 3.8 Flash в момент проверки отвечал 503/504 и исчерпал дневную квоту — ходы шли через fallback.
+
 **Готово, когда:** в CLI-заглушке можно задать «monthly revenue for 2024», затем «а только для категории Jeans?», и второй ответ корректно модифицирует первый запрос.
 
 ---

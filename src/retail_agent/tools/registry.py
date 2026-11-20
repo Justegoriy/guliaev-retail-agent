@@ -25,6 +25,8 @@ class ExecutedQuery:
     purpose: str
     rows: int
     columns: tuple[str, ...]
+    source: str = "run_sql"  # or "benchmark"
+    original_sql: str = ""  # as written by the model (passed the Guard), for follow-ups
 
 
 class TurnState:

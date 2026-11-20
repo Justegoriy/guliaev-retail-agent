@@ -30,13 +30,13 @@ from langchain_core.exceptions import (
     ModelTimeoutError,
 )
 from langchain_core.language_models import LanguageModelInput
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatResult
 from langchain_core.rate_limiters import BaseRateLimiter
 from langchain_core.runnables import Runnable
 from langchain_core.runnables.retry import RunnableRetry
 from langchain_google_genai import ChatGoogleGenerativeAI
-from pydantic import Field
+from pydantic import BaseModel, Field
 from tenacity import (
     RetryCallState,
     stop_after_attempt,
@@ -358,8 +358,14 @@ def _resilient(
     model: GeminiChat,
     tools: Sequence[Any] | None,
     fallback_from: str | None = None,
+    structured_output: type[BaseModel] | None = None,
 ) -> LoggedRetry:
-    bound = model.bind_tools(tools) if tools else model
+    if structured_output is not None:
+        bound: Runnable = model.with_structured_output(structured_output)
+    elif tools:
+        bound = model.bind_tools(tools)
+    else:
+        bound = model
     return LoggedRetry(
         bound=bound,
         kwargs={},
@@ -377,11 +383,13 @@ def build_chat_model(
     tools: Sequence[Any] | None = None,
     *,
     settings: Settings | None = None,
-) -> Runnable[LanguageModelInput, AIMessage]:
+    structured_output: type[BaseModel] | None = None,
+) -> Runnable[LanguageModelInput, Any]:
     """Chat model for the agent ("main") or auxiliary calls ("guard").
 
-    Tools are bound to each model before the retry/fallback wrappers, which do not
-    support `bind_tools` themselves.
+    Tools (or a structured output schema, whose instances the runnable then returns) are
+    bound to each model before the retry/fallback wrappers, which do not support
+    `bind_tools` / `with_structured_output` themselves.
     """
     settings = settings or get_settings()
     if purpose == "main":
@@ -389,7 +397,12 @@ def build_chat_model(
     else:
         primary_name, fallback_name = settings.gemini_aux_model, None
 
-    primary = _resilient(settings, _chat_model(settings, primary_name, purpose, "primary"), tools)
+    primary = _resilient(
+        settings,
+        _chat_model(settings, primary_name, purpose, "primary"),
+        tools,
+        structured_output=structured_output,
+    )
     if not fallback_name or fallback_name == primary_name:
         return primary
     fallback = _resilient(
@@ -397,5 +410,6 @@ def build_chat_model(
         _chat_model(settings, fallback_name, purpose, "fallback"),
         tools,
         fallback_from=primary_name,
+        structured_output=structured_output,
     )
     return primary.with_fallbacks([fallback])

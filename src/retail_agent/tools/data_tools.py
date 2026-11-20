@@ -201,6 +201,7 @@ def _run_sql(ctx: ToolContext) -> BaseTool:
                 purpose=purpose,
                 rows=len(df),
                 columns=tuple(str(c) for c in df.columns),
+                original_sql=sql.strip(),
             )
         )
         return format_result(
@@ -303,7 +304,9 @@ def _get_company_benchmark(ctx: ToolContext) -> BaseTool:
             return "ERROR(internal): the benchmark query failed; do not retry."
 
         purpose = f"company benchmark: {metric}"
-        ctx.turn.record(ExecutedQuery(sql=sql, purpose=purpose, rows=len(df), columns=()))
+        ctx.turn.record(
+            ExecutedQuery(sql=sql, purpose=purpose, rows=len(df), columns=(), source="benchmark")
+        )
         header = (
             f"OK: company-wide {metric} (all categories, anonymized totals), "
             f"{start_date.isoformat()}..{end_date.isoformat()}.\n"

@@ -2,19 +2,26 @@
 
 import argparse
 import sys
-import uuid
+import time
 from collections.abc import Callable
 
+from langgraph.errors import GraphRecursionError
 from prompt_toolkit import PromptSession
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.table import Table
 
-from retail_agent import auth
+from retail_agent import auth, errors
+from retail_agent.graph.builder import AgentSession, create_session
 from retail_agent.observability import logger, tracing
 from retail_agent.observability.logger import log_event
 from retail_agent.settings import get_settings
 
 EXIT_COMMANDS = {"/exit", "/quit"}
+STEP_LIMIT_MESSAGE = (
+    "The request turned out to be too complex to finish in one go. "
+    "Please narrow it down or split it into smaller questions."
+)
 
 console = Console()
 
@@ -57,7 +64,43 @@ def _make_reader() -> Callable[[str], str]:
     return input
 
 
-def _repl(user: auth.UserContext) -> None:
+def _run_turn(session: AgentSession, text: str) -> None:
+    trace_id = logger.new_trace_id()
+    log_event("turn_start", length=len(text))
+    started = time.perf_counter()
+    try:
+        with console.status("Thinking..."):
+            outcome = session.run_turn(text, trace_id)
+    except GraphRecursionError:
+        log_event("turn_end", level="warning", status="error", error_kind="step_limit")
+        console.print(f"[yellow]{STEP_LIMIT_MESSAGE}[/yellow] [dim](trace: {trace_id})[/dim]")
+        return
+    except Exception as exc:
+        kind = errors.classify(exc)
+        log_event(
+            "turn_end",
+            level="error",
+            status="error",
+            error_kind=kind.value,
+            error=type(exc).__name__,
+            detail=str(exc)[:500],
+        )
+        console.print(f"[red]{errors.user_message(kind, trace_id)}[/red]")
+        return
+    log_event(
+        "turn_end",
+        status="blocked" if outcome.blocked else "ok",
+        latency_ms=int((time.perf_counter() - started) * 1000),
+        sql_count=len(session.deps.tool_ctx.turn.executed),
+        sql_failures=session.deps.tool_ctx.turn.sql_failures,
+        bq_bytes=session.deps.tool_ctx.turn.bq_bytes,
+    )
+    console.print(Markdown(outcome.answer))
+    console.print(f"[dim]trace: {trace_id}[/dim]")
+
+
+def _repl(session: AgentSession) -> None:
+    user = session.user
     read = _make_reader()
     console.print(
         f"Hi {user.name} ({user.role}, access: {user.scope_label}). "
@@ -65,16 +108,15 @@ def _repl(user: auth.UserContext) -> None:
     )
     while True:
         try:
-            text = read("you> ").strip()
+            # Windows PowerShell prefixes piped stdin with a byte order mark.
+            text = read("you> ").lstrip("\ufeff").strip()
         except (EOFError, KeyboardInterrupt):
             break
         if not text:
             continue
         if text.lower() in EXIT_COMMANDS:
             break
-        logger.new_trace_id()
-        log_event("user_message", length=len(text))
-        console.print("[dim]The agent is not wired up yet.[/dim]")
+        _run_turn(session, text)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -95,7 +137,15 @@ def main(argv: list[str] | None = None) -> int:
         return 130
 
     logger.user_id_var.set(user.user_id)
-    logger.conversation_id_var.set(uuid.uuid4().hex)
+    try:
+        with console.status("Connecting..."):
+            session = create_session(user, settings)
+    except Exception as exc:
+        kind = errors.classify(exc)
+        log_event("startup_failed", level="error", error_kind=kind.value, error=type(exc).__name__)
+        detail = f" ({exc})" if isinstance(exc, errors.ConfigurationError) else ""
+        console.print(f"[red]{errors.user_message(kind)}{detail}[/red]")
+        return 2
     log_event(
         "session_start",
         role=user.role,
@@ -104,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
         langsmith=tracing_status.enabled,
     )
     try:
-        _repl(user)
+        _repl(session)
     finally:
         log_event("session_end")
     console.print("Bye!")
