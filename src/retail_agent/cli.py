@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.table import Table
 
 from retail_agent import auth
-from retail_agent.observability import logger
+from retail_agent.observability import logger, tracing
 from retail_agent.observability.logger import log_event
 from retail_agent.settings import get_settings
 
@@ -81,6 +81,9 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     settings = get_settings()
     logger.configure(settings.log_path, debug=args.debug)
+    tracing_status = tracing.setup_langsmith(settings)
+    if tracing_status.warning:
+        console.print(f"[yellow]{tracing_status.warning}[/yellow]")
 
     try:
         users = auth.load_users()
@@ -98,6 +101,7 @@ def main(argv: list[str] | None = None) -> int:
         role=user.role,
         category_groups=list(user.category_groups),
         categories=list(user.categories),
+        langsmith=tracing_status.enabled,
     )
     try:
         _repl(user)

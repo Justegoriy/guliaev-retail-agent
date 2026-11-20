@@ -95,6 +95,7 @@ flowchart LR
 │   └── observability/
 │       ├── logger.py              # JSON-логи, trace_id через contextvars
 │       ├── callbacks.py           # LangChain callback: токены, latency, ошибки
+│       ├── tracing.py             # LangSmith (anonymizer, проверка ключа), config хода
 │       └── inspect.py             # /trace, /stats
 ├── tests/
 ├── evals/
@@ -258,17 +259,24 @@ class QueryResult:                      # bigquery
 
 **Файлы:** `llm.py`, `errors.py`, `observability/callbacks.py`, `tests/test_errors.py`.
 
-- [ ] `build_chat_model(purpose: "main" | "guard")`:
+- [x] `build_chat_model(purpose: "main" | "guard")`:
   `ChatGoogleGenerativeAI(model=..., timeout=LLM_TIMEOUT_S, max_retries=0, rate_limiter=InMemoryRateLimiter(LLM_RPM/60))`
   → `.with_retry(retry_if_exception_type=<транзиентные: 429, 5xx, timeout>, stop_after_attempt=3, wait_exponential_jitter=True)`
   → `.with_fallbacks([fallback_model с тем же retry])`.
   Для `guard` (и прочих вспомогательных вызовов) модель = `GEMINI_AUX_MODEL` (Flash-Lite), без fallback (при недоступности guard работает только на правилах). Квоты free tier считаются по моделям отдельно, поэтому вспомогательные вызовы не расходуют дневную квоту Flash.
   **Дневная квота:** 429 с `QuotaFailure` по per-day лимиту (в `error.details`, `retryDelay` в часах) не ретраится — сразу fallback; модель помечается исчерпанной до конца сессии (не тратить время на заведомо неудачные вызовы), событие `quota_exhausted`. Ретраи с backoff — только для per-minute 429 (с учётом `retryDelay`) и 5xx/timeout.
   Tools привязываются **до** `with_retry/with_fallbacks` к обеим моделям.
-- [ ] `errors.py`: `classify(exc) -> ErrorKind` (`llm_unavailable`, `llm_rate_limited`, `bq_unavailable`, `quota`, `auth`, `internal`) и `user_message(kind, trace_id)` — дружелюбный текст с `trace_id` для обращения в поддержку.
-- [ ] `callbacks.py` — `BaseCallbackHandler`: `on_llm_start/end/error` (модель, latency, input/output tokens из `usage_metadata`), `on_tool_start/end/error`, `on_retry`. Пишет события `llm_call`, `tool_call`, `llm_error`, `fallback_used`. Аргументы и результаты tools — через `mask_text`, обрезка до 2 КБ.
+- [x] `errors.py`: `classify(exc) -> ErrorKind` (`llm_unavailable`, `llm_rate_limited`, `bq_unavailable`, `quota`, `auth`, `internal`) и `user_message(kind, trace_id)` — дружелюбный текст с `trace_id` для обращения в поддержку.
+- [x] `callbacks.py` — `BaseCallbackHandler`: `on_llm_start/end/error` (модель, latency, input/output tokens из `usage_metadata`), `on_tool_start/end/error`, `on_retry`. Пишет события `llm_call`, `tool_call`, `llm_error`, `fallback_used`. Аргументы и результаты tools — через `mask_text`, обрезка до 2 КБ.
   При `LOG_LLM_PAYLOADS=true` полные сообщения, отправленные в модель, и её ответ (после `mask_text`) пишутся в `logs/llm_payloads.jsonl` с `trace_id` и `call_id` — это источник для `/trace <id> --full` (полная переписка с моделью при разборе).
-- [ ] LangSmith: включается переменными `LANGSMITH_TRACING/API_KEY/PROJECT`. Для каждого хода — `config={"run_name": "turn", "metadata": {trace_id, conversation_id, user_role}, "tags": [user_role]}`. PII: tool outputs уже маскированы; дополнительно `langsmith.Client(anonymizer=...)` с нашим `mask_text` (проверить актуальный API anonymizer при реализации). Сбой LangSmith (нет сети, неверный ключ) не влияет на ход: трейсы отправляются в фоне, при старте делается проверка ключа — при ошибке трассировка в LangSmith отключается с предупреждением в баннере, локальные логи продолжают работать.
+- [x] LangSmith: включается переменными `LANGSMITH_TRACING/API_KEY/PROJECT`. Для каждого хода — `config={"run_name": "turn", "metadata": {trace_id, conversation_id, user_role}, "tags": [user_role]}`. PII: tool outputs уже маскированы; дополнительно `langsmith.Client(anonymizer=...)` с нашим `mask_text` (проверить актуальный API anonymizer при реализации). Сбой LangSmith (нет сети, неверный ключ) не влияет на ход: трейсы отправляются в фоне, при старте делается проверка ключа — при ошибке трассировка в LangSmith отключается с предупреждением в баннере, локальные логи продолжают работать.
+
+→ Сделано. Отличия и дополнения:
+- Лимитер — `SlidingWindowRateLimiter` (≤ RPM запросов в любом 60-секундном окне), а не `InMemoryRateLimiter`: тот стартует с пустым бакетом и разносит каждый запрос на 60/RPM с (12 с при 5 RPM). Лимитер свой у каждой модели (`LLM_RPM` для основной, `LLM_AUX_RPM` для Flash-Lite — fallback и guard делят одну квоту). Он вызывается внутри `GeminiChat._generate` после проверки «квота исчерпана», чтобы мгновенные отказы не тратили слоты.
+- `with_retry` реализован подклассом `RunnableRetry` (`LoggedRetry`): ждёт `retryDelay` из ответа (≤ 60 с), пишет `llm_retry` (сам `RunnableRetry` не вызывает `on_retry`) и `fallback_used`. Дневная квота распознаётся по `quotaId` с `PerDay` (или `retryDelay` ≥ 10 мин) в `__cause__` — исходном `google.genai` `ClientError`.
+- Бюджет ретраев `LLM_RETRY_BUDGET_S=30`: на живом API `gemini-3.8-flash` отвечал 503 «high demand», держа запрос до ~58 с, и 3 попытки занимали ~3 мин до fallback. Теперь новая попытка не начинается после 30 с.
+- LangSmith — `observability/tracing.py`: `setup_langsmith()` (проверка ключа через `list_projects`, `Client(anonymizer=create_anonymizer(mask_text))`, выключение env-трейсера LangChain, иначе он трассировал бы без anonymizer) и `turn_config()` (callbacks + metadata/tags хода). `ConfigurationError` (нет `GOOGLE_API_KEY`) и `LlmQuotaExhausted` в `errors.py`.
+- Проверка: `scripts/check_llm.py [--main-model NAME]`. Fallback проверен и на несуществующей модели (404), и на реальных 503; с неверным ключом LangSmith CLI стартует с предупреждением.
 
 **Готово, когда:** простой вызов модели работает; при неверном имени основной модели срабатывает fallback и это видно в логе; с неверным `LANGSMITH_API_KEY` CLI работает.
 

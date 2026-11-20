@@ -24,7 +24,9 @@ class Settings(BaseSettings):
     gemini_aux_model: str = "gemini-3.5-flash-lite"
     gemini_embedding_model: str = "gemini-embedding-001"
     llm_rpm: float = Field(5, gt=0)
+    llm_aux_rpm: float = Field(10, gt=0)
     llm_timeout_s: float = Field(60, gt=0)
+    llm_retry_budget_s: float = Field(30, ge=0)
     llm_price_per_1m_input: float = 0.75
     llm_price_per_1m_output: float = 3.75
 
