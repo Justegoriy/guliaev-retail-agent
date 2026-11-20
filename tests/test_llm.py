@@ -175,6 +175,51 @@ def test_all_attempts_fail(settings, fake):
     assert classify(info.value) is ErrorKind.LLM_UNAVAILABLE
 
 
+def test_overloaded_main_model_is_skipped_during_cooldown(settings, fake, isolated, monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr(llm, "_clock", lambda: now[0])
+    settings = settings.model_copy(update={"llm_primary_cooldown_s": 120})
+    gemini = fake(main_m=[server_error(503)] * 3 + [ok("main again")], fb_m=[ok("a"), ok("b")])
+    model = llm.build_chat_model("main", settings=settings)
+
+    assert model.invoke(QUESTION).text == "a"
+    assert model.invoke(QUESTION).text == "b"
+    assert gemini.calls == ["main-m"] * 3 + ["fb-m", "fb-m"]
+    [cooldown] = events(isolated["log"], "llm_cooldown")
+    assert cooldown["model"] == "main-m" and cooldown["seconds"] == 120
+    reasons = [e["reason"] for e in events(isolated["log"], "fallback_used")]
+    assert reasons == ["cooldown", "cooldown"]
+
+    now[0] += 121
+    assert model.invoke(QUESTION).text == "main again"
+
+
+def test_non_transient_error_does_not_start_cooldown(settings, fake, isolated):
+    fake(main_m=[client_error(404)], fb_m=[ok()])
+    llm.build_chat_model("main", settings=settings).invoke(QUESTION)
+    assert llm.cooldown_left("main-m") == 0
+    assert events(isolated["log"], "llm_cooldown") == []
+
+
+def test_cooldown_disabled_and_not_used_without_fallback(settings, fake, isolated):
+    off = settings.model_copy(update={"llm_primary_cooldown_s": 0})
+    fake(main_m=[server_error()] * 3, fb_m=[ok()])
+    llm.build_chat_model("main", settings=off).invoke(QUESTION)
+    assert llm.cooldown_left("main-m") == 0
+
+    fake(aux_m=[server_error()] * 3)
+    with pytest.raises(Exception) as info:
+        llm.build_chat_model("guard", settings=settings).invoke(QUESTION)
+    assert classify(info.value) is ErrorKind.LLM_UNAVAILABLE
+    assert llm.cooldown_left("aux-m") == 0
+
+
+def test_cooling_down_error_is_not_retried_and_means_unavailable():
+    exc = llm.LlmCoolingDown("main-m", 30)
+    assert not llm.is_transient(exc)
+    assert classify(exc) is ErrorKind.LLM_UNAVAILABLE
+
+
 def test_both_models_out_of_daily_quota(settings, fake):
     fake(main_m=[client_error(429, DAILY)], fb_m=[client_error(429, DAILY)])
     with pytest.raises(LlmQuotaExhausted) as info:

@@ -9,32 +9,32 @@ terms:
     sql: SUM(IF(oi.status NOT IN ('Cancelled', 'Returned'), oi.sale_price, 0)) FROM order_items oi
 
   aov:
-    aliases: [average order value, avg order value, средний чек]
+    aliases: [average order value, avg order value]
     definition: Revenue divided by the number of distinct orders with at least one sold item.
     sql: SAFE_DIVIDE(<revenue>, COUNT(DISTINCT IF(oi.status NOT IN ('Cancelled', 'Returned'), oi.order_id, NULL)))
 
   margin:
-    aliases: [gross margin, profit, маржа]
+    aliases: [gross margin, profit]
     definition: Revenue minus product cost of sold items; margin % = margin / revenue.
     sql: SUM(oi.sale_price - p.cost) over sold items, JOIN products p ON oi.product_id = p.id
 
   return rate:
-    aliases: [returns, доля возвратов]
+    aliases: [returns]
     definition: Returned items divided by items that were not Cancelled.
     sql: SAFE_DIVIDE(COUNTIF(oi.status = 'Returned'), COUNTIF(oi.status != 'Cancelled'))
 
   active customer:
-    aliases: [active user, активный клиент]
+    aliases: [active user]
     definition: A customer with at least one sold item in the period (default period - the last 90 days).
     sql: COUNT(DISTINCT oi.user_id) over sold items with oi.created_at in the period
 
   repeat customer:
-    aliases: [returning customer, повторный клиент]
+    aliases: [returning customer]
     definition: A customer with two or more distinct orders containing sold items (all time unless a period is given).
     sql: users whose COUNT(DISTINCT oi.order_id) over sold items >= 2
 
   churn:
-    aliases: [churn rate, churned customer, отток]
+    aliases: [churn rate, churned customer]
     definition: >-
       A customer active in the previous period who has no sold items in the current period
       (period = calendar month unless the user says otherwise). Churn rate = churned customers /
@@ -44,6 +44,5 @@ terms:
       e.g. WITH active AS (SELECT DISTINCT user_id, DATE_TRUNC(DATE(created_at), MONTH) AS m ...)
 
   new customer:
-    aliases: [новый клиент]
     definition: A customer whose first sold item falls in the period.
     sql: MIN(DATE(oi.created_at)) per user over sold items, within the period

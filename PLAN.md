@@ -276,6 +276,7 @@ class QueryResult:                      # bigquery
 - `with_retry` реализован подклассом `RunnableRetry` (`LoggedRetry`): ждёт `retryDelay` из ответа (≤ 60 с), пишет `llm_retry` (сам `RunnableRetry` не вызывает `on_retry`) и `fallback_used`. Дневная квота распознаётся по `quotaId` с `PerDay` (или `retryDelay` ≥ 10 мин) в `__cause__` — исходном `google.genai` `ClientError`.
 - Бюджет ретраев `LLM_RETRY_BUDGET_S=30`: на живом API `gemini-3.8-flash` отвечал 503 «high demand», держа запрос до ~58 с, и 3 попытки занимали ~3 мин до fallback. Теперь новая попытка не начинается после 30 с.
 - LangSmith — `observability/tracing.py`: `setup_langsmith()` (проверка ключа через `list_projects`, `Client(anonymizer=create_anonymizer(mask_text))`, выключение env-трейсера LangChain, иначе он трассировал бы без anonymizer) и `turn_config()` (callbacks + metadata/tags хода). `ConfigurationError` (нет `GOOGLE_API_KEY`) и `LlmQuotaExhausted` в `errors.py`.
+- Cooldown основной модели (`LLM_PRIMARY_COOLDOWN_S=300`, добавлено на шаге 6): если ретраи основной модели исчерпаны на 5xx/таймаутах, она пропускается до конца cooldown (`LlmCoolingDown`, не ретраится) и сразу отвечает fallback. Без этого каждый шаг агента заново тратил до ~60 с на перегруженную модель, и ход длился ~2 мин. События `llm_cooldown` и `fallback_used(reason=error|cooldown|quota)`. Для guard (нет fallback) cooldown не применяется.
 - Проверка: `scripts/check_llm.py [--main-model NAME]`. Fallback проверен и на несуществующей модели (404), и на реальных 503; с неверным ключом LangSmith CLI стартует с предупреждением.
 
 **Готово, когда:** простой вызов модели работает; при неверном имени основной модели срабатывает fallback и это видно в логе; с неверным `LANGSMITH_API_KEY` CLI работает.
@@ -391,17 +392,17 @@ START → input_guard ─(blocked)→ output_guard → END
 → Сделано (6.1–6.6). Отличия и дополнения:
 - Сервисы сессии (`ToolContext`, tools, модели, источники промпта) лежат в `AgentDeps` и попадают в узлы через замыкание. В state нет `user`, `conversation_id` и `sql_failures`: счётчики хода — `TurnState` из шага 5, сбрасываются в узле `input_guard`, который при resume после interrupt повторно не выполняется. Добавлено поле `guard` (`GuardDecision`: category, reason, source, pii_request). Фасад для CLI — `AgentSession` (`run_turn`, `new_conversation`, `switch_conversation`, `state`), production-сборка — `create_session`.
 - System prompt собирается один раз за ход (кэш по `trace_id`). `persona.md` и `glossary.yaml` перечитываются по mtime, с событиями `persona_reloaded` / `glossary_reloaded` (хэш версии); событие `prompt_built` содержит версии persona и glossary, поэтому часть шага 8 про persona уже сделана. Блоки preferences и golden — пустые точки подключения до шагов 8–9.
-- В конце промпта каждый ход явно указывается язык ответа (D21), язык последнего сообщения определяется в коде: без этого модель на фоне английской истории отвечала по-английски. Fallback Flash-Lite всё равно иногда отвечает по-английски.
+- Общение только на английском (D21 пересмотрено): ядро промпта требует отвечать по-английски, отказы guard — английские шаблоны, русские синонимы убраны из glossary. Regex-правила guard по-прежнему ловят русские формулировки injection и изменения данных.
 - `analysis_context.sql` хранит SQL в виде, написанном моделью (после проверки Guard), а не ACL-переписанный: уточнение модифицирует читаемый запрос, а Guard заново применяет ACL. В `ExecutedQuery` добавлены `original_sql` и `source`; benchmark не меняет контекст анализа.
 - Модель видит все ещё не свёрнутые ходы (не больше `HISTORY_SUMMARIZE_AFTER_TURNS`), а не только `HISTORY_KEEP_TURNS`: иначе ходы 7–10 пропадали бы до суммаризации. Суммаризация оставляет `HISTORY_KEEP_TURNS` ходов. Tool calls без ответа (ход оборван лимитом шагов) отбрасываются. Если суммаризация не удалась, сообщения остаются, а история для модели всё равно ограничена.
 - Финальный ответ маскируется уже в узле `agent`, чтобы немаскированный текст не попал ни в один checkpoint. `output_guard` проверяет повторно и подменяет пустой ответ.
-- Input guard: injection и команды изменения данных блокируются правилами без вызова модели. Правила не срабатывают на «удали отчёт» и «убери товары без продаж из списка». Запрос PII («emails of top customers») пропускается с заметкой в промпте; слово «name» считается PII только в формах «customer names» / «names of … customers». Классификатор получает 3 последние пары реплик и тему анализа. Отказ по шаблону на языке вопроса.
+- Input guard: injection и команды изменения данных блокируются правилами без вызова модели. Правила не срабатывают на «удали отчёт» и «убери товары без продаж из списка». Запрос PII («emails of top customers») пропускается с заметкой в промпте; слово «name» считается PII только в формах «customer names» / «names of … customers». Классификатор получает 3 последние пары реплик и тему анализа. Отказ — по шаблону.
 - Ошибки tools: невалидные аргументы → `ERROR(invalid_args)` (модель исправляет), прочие исключения → `ERROR(internal)`. `GraphInterrupt` ToolNode пропускает сам.
 - `build_chat_model(..., structured_output=Schema)` — для guard, извлечения контекста и summary.
 - CLI-заглушка подключена к графу: `turn_start` / `turn_end`, классификация ошибок, сообщение при лимите шагов, удаление BOM из stdin PowerShell.
 - Проверено вживую (`ceo` и `bottoms_manager`): «monthly revenue for 2024» → «а только для категории Jeans?» — второй запрос тот же SQL плюс `p.category = 'Jeans'`, цифры Jeans у обоих пользователей совпадают; injection блокируется правилом. Gemini 3.8 Flash в момент проверки отвечал 503/504 и исчерпал дневную квоту — ходы шли через fallback.
 
-**Готово, когда:** в CLI-заглушке можно задать «monthly revenue for 2024», затем «а только для категории Jeans?», и второй ответ корректно модифицирует первый запрос.
+**Готово, когда:** в CLI-заглушке можно задать «monthly revenue for 2024», затем «and only for the Jeans category?», и второй ответ корректно модифицирует первый запрос.
 
 ---
 
@@ -495,7 +496,7 @@ preference_signals(id INTEGER PK, user_id, key, value JSON, weight REAL,
 
 ### 9.3. Неявные предпочтения (inferred)
 - Извлечение сигналов объединено с узлом `update_context` (шаг 6.5) в **один** structured-вызов лёгкой модели после хода, чтобы не тратить лишний запрос: модель получает реплику пользователя, начало ответа агента и текущий профиль, возвращает `{analysis_context..., preference_signals: [{key, value, kind, evidence}]}`.
-- Дешёвые детерминированные сигналы без LLM: язык вопроса (`language`), длина ответа, после которой просят «короче», частота метрик и сегментов в выполненных SQL (`focus_metrics`, `focus_segments` по колонкам и фильтрам из `analysis_context`).
+- Дешёвые детерминированные сигналы без LLM: длина ответа, после которой просят «короче», частота метрик и сегментов в выполненных SQL (`focus_metrics`, `focus_segments` по колонкам и фильтрам из `analysis_context`).
 - Фидбек: команды `/good` и `/bad [комментарий]` на последний ответ → сигнал `feedback` (`/bad` + «слишком длинно» → `detail_level=brief`). Логируется `feedback` для observability.
 - Ошибка извлечения → ход не падает, событие `preference_extraction_failed`.
 

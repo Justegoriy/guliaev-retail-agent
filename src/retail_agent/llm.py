@@ -8,7 +8,9 @@ timeouts, within `LLM_RETRY_BUDGET_S` per model: an overloaded model can hold ea
 for almost the whole timeout, and the fallback is the better bet by then.
 A 429 for a per-day quota is not retried: the model is marked exhausted for the
 rest of the process and later calls fail before sending a request, so the fallback takes
-over at once. Quotas are per model, so each model name has its own client-side limiter.
+over at once. When the main model runs out of retries on 5xx/timeouts, it is skipped for
+`LLM_PRIMARY_COOLDOWN_S` and the fallback answers directly. Quotas are per model, so each
+model name has its own client-side limiter.
 """
 
 import asyncio
@@ -44,7 +46,12 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from retail_agent.errors import HTTP_TRANSPORT_ERRORS, ConfigurationError, LlmQuotaExhausted
+from retail_agent.errors import (
+    HTTP_TRANSPORT_ERRORS,
+    ConfigurationError,
+    LlmCoolingDown,
+    LlmQuotaExhausted,
+)
 from retail_agent.observability.logger import log_event
 from retail_agent.settings import Settings, get_settings
 
@@ -147,10 +154,49 @@ def mark_exhausted(model: str, quota_id: str | None = None) -> None:
     log_event("quota_exhausted", level="warning", model=model, quota_id=quota_id)
 
 
+# -- cooldown after repeated failures ---------------------------------------------------
+# An overloaded model answers 503/504 for minutes, often after holding each request for
+# most of the timeout. Once a model with a fallback has used up its retries on such
+# errors, every agent step of the next minutes would pay the same price again, so the
+# model is skipped until the cooldown ends.
+
+_cooldown_until: dict[str, float] = {}
+_cooldown_lock = threading.Lock()
+_clock: Callable[[], float] = time.monotonic
+
+
+def cooldown_left(model: str) -> float:
+    with _cooldown_lock:
+        until = _cooldown_until.get(model)
+        if until is None:
+            return 0.0
+        left = until - _clock()
+        if left <= 0:
+            del _cooldown_until[model]
+            return 0.0
+        return left
+
+
+def start_cooldown(model: str, seconds: float, error: BaseException) -> None:
+    if seconds <= 0:
+        return
+    with _cooldown_lock:
+        _cooldown_until[model] = _clock() + seconds
+    log_event(
+        "llm_cooldown",
+        level="warning",
+        model=model,
+        seconds=seconds,
+        error=type(error).__name__,
+    )
+
+
 def reset_llm_state() -> None:
-    """Forget exhausted models and rate-limit windows (new process semantics, for tests)."""
+    """Forget exhausted models, cooldowns and rate-limit windows (for tests)."""
     with _exhausted_lock:
         _exhausted.clear()
+    with _cooldown_lock:
+        _cooldown_until.clear()
     with _limiters_lock:
         _limiters.clear()
 
@@ -211,7 +257,7 @@ def rate_limit_info(exc: BaseException) -> RateLimitInfo:
 
 def is_transient(exc: BaseException) -> bool:
     """Worth retrying the same model: per-minute 429, 5xx, timeouts, network errors."""
-    if isinstance(exc, LlmQuotaExhausted):
+    if isinstance(exc, LlmQuotaExhausted | LlmCoolingDown):
         return False
     if isinstance(exc, ModelRateLimitError):
         info = rate_limit_info(exc)
@@ -256,6 +302,12 @@ class GeminiChat(ChatGoogleGenerativeAI):
             mark_exhausted(self.model_name, info.quota_id)
             raise LlmQuotaExhausted(self.model_name) from exc
 
+    def _raise_if_unavailable(self) -> None:
+        if is_exhausted(self.model_name):
+            raise LlmQuotaExhausted(self.model_name)
+        if (left := cooldown_left(self.model_name)) > 0:
+            raise LlmCoolingDown(self.model_name, left)
+
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -263,8 +315,7 @@ class GeminiChat(ChatGoogleGenerativeAI):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        if is_exhausted(self.model_name):
-            raise LlmQuotaExhausted(self.model_name)
+        self._raise_if_unavailable()
         if self.request_limiter is not None:
             self.request_limiter.acquire(blocking=True)
         try:
@@ -280,8 +331,7 @@ class GeminiChat(ChatGoogleGenerativeAI):
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        if is_exhausted(self.model_name):
-            raise LlmQuotaExhausted(self.model_name)
+        self._raise_if_unavailable()
         if self.request_limiter is not None:
             await self.request_limiter.aacquire(blocking=True)
         try:
@@ -297,6 +347,7 @@ class LoggedRetry(RunnableRetry):
     model_name: str
     fallback_from: str | None = None
     budget_s: float = 30.0
+    cooldown_s: float = 0.0  # > 0 only for a model that has a fallback
 
     @property
     def _kwargs_retrying(self) -> dict[str, Any]:
@@ -320,21 +371,41 @@ class LoggedRetry(RunnableRetry):
         )
 
     def _log_fallback(self) -> None:
-        if self.fallback_from is not None:
-            log_event(
-                "fallback_used",
-                level="warning",
-                from_model=self.fallback_from,
-                to_model=self.model_name,
-            )
+        if self.fallback_from is None:
+            return
+        if is_exhausted(self.fallback_from):
+            reason = "quota"
+        elif cooldown_left(self.fallback_from) > 0:
+            reason = "cooldown"
+        else:
+            reason = "error"
+        log_event(
+            "fallback_used",
+            level="warning",
+            from_model=self.fallback_from,
+            to_model=self.model_name,
+            reason=reason,
+        )
+
+    def _cool_down_on(self, exc: BaseException) -> None:
+        if self.cooldown_s > 0 and is_transient(exc):
+            start_cooldown(self.model_name, self.cooldown_s, exc)
 
     def _invoke(self, input_, run_manager, config, **kwargs):  # type: ignore[override]
         self._log_fallback()
-        return super()._invoke(input_, run_manager, config, **kwargs)
+        try:
+            return super()._invoke(input_, run_manager, config, **kwargs)
+        except Exception as exc:
+            self._cool_down_on(exc)
+            raise
 
     async def _ainvoke(self, input_, run_manager, config, **kwargs):  # type: ignore[override]
         self._log_fallback()
-        return await super()._ainvoke(input_, run_manager, config, **kwargs)
+        try:
+            return await super()._ainvoke(input_, run_manager, config, **kwargs)
+        except Exception as exc:
+            self._cool_down_on(exc)
+            raise
 
 
 def _chat_model(settings: Settings, model: str, purpose: Purpose, role: str) -> GeminiChat:
@@ -359,6 +430,7 @@ def _resilient(
     tools: Sequence[Any] | None,
     fallback_from: str | None = None,
     structured_output: type[BaseModel] | None = None,
+    cooldown_s: float = 0.0,
 ) -> LoggedRetry:
     if structured_output is not None:
         bound: Runnable = model.with_structured_output(structured_output)
@@ -375,6 +447,7 @@ def _resilient(
         model_name=model.model_name,
         fallback_from=fallback_from,
         budget_s=settings.llm_retry_budget_s,
+        cooldown_s=cooldown_s,
     )
 
 
@@ -397,13 +470,15 @@ def build_chat_model(
     else:
         primary_name, fallback_name = settings.gemini_aux_model, None
 
+    has_fallback = bool(fallback_name) and fallback_name != primary_name
     primary = _resilient(
         settings,
         _chat_model(settings, primary_name, purpose, "primary"),
         tools,
         structured_output=structured_output,
+        cooldown_s=settings.llm_primary_cooldown_s if has_fallback else 0.0,
     )
-    if not fallback_name or fallback_name == primary_name:
+    if not has_fallback:
         return primary
     fallback = _resilient(
         settings,

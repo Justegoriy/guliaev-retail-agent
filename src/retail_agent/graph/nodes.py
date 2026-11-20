@@ -33,10 +33,7 @@ from retail_agent.tools.registry import ToolContext
 AuxFactory = Callable[[type[BaseModel]], Runnable[Any, Any]]
 ReportLookup = Callable[[Sequence[str]], list[SessionReport]]
 
-EMPTY_ANSWER = {
-    "en": "I could not produce an answer this time. Please rephrase the question.",
-    "ru": "Не получилось сформулировать ответ. Пожалуйста, переформулируйте вопрос.",
-}
+EMPTY_ANSWER = "I could not produce an answer this time. Please rephrase the question."
 
 
 def _reports_by_id(ids: Sequence[str]) -> list[SessionReport]:
@@ -123,7 +120,6 @@ class AgentNodes:
             analysis_context=state.get("analysis_context"),
             session_reports=deps.session_reports(report_ids) if report_ids else [],
             pii_request=bool(guard.get("pii_request")),
-            reply_language=input_guard.language(memory.last_user_text(state["messages"])),
         )
         prompt = build_system_prompt(inputs)
         log_event(
@@ -166,7 +162,7 @@ class AgentNodes:
             ),
         }
         if result.blocked:
-            update["messages"] = [AIMessage(input_guard.refusal(result.category, text))]
+            update["messages"] = [AIMessage(input_guard.refusal(result.category))]
         return update
 
     def agent(self, state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -185,9 +181,8 @@ class AgentNodes:
             return {}
         masked = mask_ai_message(last, where="output")
         if not masked.text.strip():
-            lang = input_guard.language(memory.last_user_text(state["messages"]))
             log_event("empty_answer", level="warning")
-            masked = masked.model_copy(update={"content": EMPTY_ANSWER[lang]})
+            masked = masked.model_copy(update={"content": EMPTY_ANSWER})
         log_event("answer", chars=len(masked.text), blocked=bool(state.get("blocked")))
         return {"messages": [masked]} if masked is not last else {}
 

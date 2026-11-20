@@ -6,6 +6,8 @@ customer id" is a better answer than a refusal, and the SQL Guard and the masker
 what actually keep PII out). The classifier blocks off-topic and malicious messages;
 it gets the previous exchanges so that "and for Swim?" counts as a follow-up.
 If the classifier fails, the guard works on the rules alone (`guard_degraded`).
+The assistant works in English, but the rules also match Russian phrasing: an attack
+does not become harmless because it is written in another language.
 """
 
 import re
@@ -107,33 +109,17 @@ PII_REQUEST_RULES = [
     re.compile(rf"{_PERSONS_RU}\s+(и\s+их\s+)?{_NAMES_RU}", _F),
 ]
 
-_CYRILLIC = re.compile(r"[а-яё]", re.IGNORECASE)
-
 REFUSALS = {
-    "en": {
-        "off_topic": (
-            "I can only help with analysis of the store's data: sales, orders, products, "
-            "customers (without personal data) and saved reports. For example, ask "
-            '"What was monthly revenue in 2024?" or "Which categories have the highest '
-            'return rate?"'
-        ),
-        "malicious": (
-            "I can't help with that. I work with the store's data in read-only mode and "
-            "follow fixed safety rules. Ask me a question about sales, products or customers."
-        ),
-    },
-    "ru": {
-        "off_topic": (
-            "Я помогаю только с анализом данных магазина: продажи, заказы, товары, клиенты "
-            "(без персональных данных) и сохранённые отчёты. Например, спросите: «Какой была "
-            "выручка по месяцам в 2024?» или «В каких категориях больше всего возвратов?»"
-        ),
-        "malicious": (
-            "С этим я помочь не могу. Я работаю с данными магазина только на чтение и "
-            "соблюдаю фиксированные правила безопасности. Задайте вопрос о продажах, "
-            "товарах или клиентах."
-        ),
-    },
+    "off_topic": (
+        "I can only help with analysis of the store's data: sales, orders, products, "
+        "customers (without personal data) and saved reports. For example, ask "
+        '"What was monthly revenue in 2024?" or "Which categories have the highest '
+        'return rate?"'
+    ),
+    "malicious": (
+        "I can't help with that. I work with the store's data in read-only mode and "
+        "follow fixed safety rules. Ask me a question about sales, products or customers."
+    ),
 }
 
 CLASSIFIER_PROMPT = """\
@@ -185,13 +171,8 @@ class GuardResult:
 Classifier = Callable[[str], GuardVerdict]
 
 
-def language(text: str) -> str:
-    return "ru" if _CYRILLIC.search(text) else "en"
-
-
-def refusal(category: str, text: str) -> str:
-    templates = REFUSALS[language(text)]
-    return templates.get(category, templates["malicious"])
+def refusal(category: str) -> str:
+    return REFUSALS.get(category, REFUSALS["malicious"])
 
 
 def _first_match(rules: Sequence[re.Pattern[str]], text: str) -> str | None:

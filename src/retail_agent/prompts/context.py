@@ -37,11 +37,6 @@ PII_REQUEST_NOTE = (
 )
 
 
-# Stated per turn: with an English history and context, models tend to drift to English.
-REPLY_LANGUAGE_NOTE = "The latest user message is in {language}: write the answer in {language}."
-LANGUAGE_NAMES = {"en": "English", "ru": "Russian"}
-
-
 @dataclass(frozen=True)
 class TextVersion:
     text: str
@@ -129,7 +124,6 @@ class PromptInputs:
     analysis_context: AnalysisContext | None = None
     session_reports: Sequence[SessionReport] = ()
     pii_request: bool = False
-    reply_language: str = "en"
 
 
 def user_block(user: UserContext) -> str:
@@ -194,6 +188,4 @@ def build_system_prompt(inputs: PromptInputs) -> str:
         )
     if inputs.pii_request:
         sections.append(("", PII_REQUEST_NOTE))
-    language = LANGUAGE_NAMES.get(inputs.reply_language, "English")
-    sections.append(("", REPLY_LANGUAGE_NOTE.format(language=language)))
     return "\n\n".join(f"# {title}\n{body}" if title else body for title, body in sections)

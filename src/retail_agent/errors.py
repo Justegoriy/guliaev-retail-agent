@@ -91,6 +91,17 @@ class LlmQuotaExhausted(AgentError):
     user_message = "The daily limit of language model requests has been reached."
 
 
+class LlmCoolingDown(AgentError):
+    """The model failed recently and is skipped for a while, so the fallback answers at once."""
+
+    def __init__(self, model: str, seconds_left: float):
+        self.model = model
+        self.seconds_left = seconds_left
+        super().__init__(f"{model} is skipped for {seconds_left:.0f}s after repeated failures")
+
+    user_message = "The language model is temporarily unavailable."
+
+
 class ErrorKind(StrEnum):
     LLM_UNAVAILABLE = "llm_unavailable"
     LLM_RATE_LIMITED = "llm_rate_limited"
@@ -105,6 +116,7 @@ class ErrorKind(StrEnum):
 HTTP_TRANSPORT_ERRORS = (httpx.TransportError, httpx2.TransportError)
 
 _LLM_UNAVAILABLE_TYPES = (
+    LlmCoolingDown,
     ModelAPIError,
     ModelConnectionError,
     ModelTimeoutError,

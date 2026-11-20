@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     llm_aux_rpm: float = Field(10, gt=0)
     llm_timeout_s: float = Field(60, gt=0)
     llm_retry_budget_s: float = Field(30, ge=0)
+    llm_primary_cooldown_s: float = Field(300, ge=0)
     llm_price_per_1m_input: float = 0.75
     llm_price_per_1m_output: float = 3.75
 

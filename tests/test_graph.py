@@ -210,10 +210,10 @@ def test_rule_block_skips_the_agent(h):
     assert h.session.state()["guard"]["source"] == "rules"
 
 
-def test_classifier_block_answers_in_users_language(h):
+def test_classifier_block_skips_the_agent(h):
     h.aux.handlers[GuardVerdict] = lambda p: GuardVerdict(category="off_topic", reason="weather")
-    out = h.turn("Какая завтра погода в Париже?")
-    assert out.blocked and out.answer.startswith("Я помогаю только с анализом")
+    out = h.turn("What's the weather in Paris tomorrow?")
+    assert out.blocked and out.answer.startswith("I can only help with analysis")
     assert h.model.requests == []
 
 
@@ -438,13 +438,6 @@ def test_prompt_blocks_and_persona_reload(h):
     prompt = h.model.system_prompt()
     assert "Be very formal." in prompt and "Be brief." not in prompt
     assert "# comment" not in prompt
-
-
-def test_reply_language_follows_latest_message(h):
-    h.turn("monthly revenue", AIMessage("Here."))
-    assert h.model.system_prompt().endswith("write the answer in English.")
-    h.turn("а только для Jeans?", AIMessage("Вот."))
-    assert h.model.system_prompt().endswith("write the answer in Russian.")
 
 
 def test_restricted_user_prompt_lists_categories(tmp_path):

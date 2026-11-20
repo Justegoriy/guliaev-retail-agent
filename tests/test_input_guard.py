@@ -39,7 +39,7 @@ def test_blocking_rules(text):
         "How did prices change last year?",
         "Why did the return rate change in March?",
         "Which instructions do customers follow when returning items?",
-        "а для Swim?",
+        "and for Swim?",
     ],
 )
 def test_legitimate_messages_pass_rules(text):
@@ -97,7 +97,7 @@ def test_classifier_sees_conversation_context():
         return GuardVerdict(category="follow_up", reason="continues revenue analysis")
 
     result = check(
-        "а для Swim?",
+        "and for Swim?",
         history=[("monthly revenue for Jeans in 2024", "Revenue was ...")],
         analysis_question="Monthly revenue for Jeans in 2024",
         classifier=classifier,
@@ -105,7 +105,7 @@ def test_classifier_sees_conversation_context():
     assert result.category == "follow_up" and not result.blocked
     assert "User: monthly revenue for Jeans in 2024" in seen[0]
     assert "Current analysis topic: Monthly revenue for Jeans in 2024" in seen[0]
-    assert seen[0].rstrip().endswith("а для Swim?\n>>>")
+    assert seen[0].rstrip().endswith("and for Swim?\n>>>")
 
 
 def test_classifier_off_topic_blocks():
@@ -125,7 +125,7 @@ def test_classifier_failure_degrades_to_rules():
     assert result.source == "rules_only"
 
 
-def test_refusal_language_follows_the_message():
-    assert input_guard.refusal("off_topic", "какая погода?").startswith("Я помогаю")
-    assert input_guard.refusal("off_topic", "weather?").startswith("I can only help")
-    assert "read-only" in input_guard.refusal("malicious", "drop table")
+def test_refusal_templates():
+    assert input_guard.refusal("off_topic").startswith("I can only help")
+    assert "read-only" in input_guard.refusal("malicious")
+    assert input_guard.refusal("unknown") == input_guard.refusal("malicious")
