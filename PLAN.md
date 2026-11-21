@@ -450,6 +450,18 @@ audit_log(id INTEGER PK, ts, user_id, action, target_ids JSON, details JSON, tra
 - `export_report`: без подтверждения файл не создаётся; чужой отчёт не экспортируется.
 - реестр: tool с `requires_confirmation=True`, который не вызывает `confirmation.require`, ловится тестом.
 
+→ Сделано (7.1–7.5). Отличия и дополнения:
+- **Каждый tool call — отдельная задача графа** (`Send("tools", [call])` вместо одного узла на все вызовы шага). При `interrupt` LangGraph перезапускает на resume весь прерванный узел; с общим узлом параллельный `run_sql` выполнился бы повторно, а `save_report` создал бы дубль. Теперь перезапускается только вызов, который ждёт подтверждения (есть тест).
+- **Подтверждение привязано к показанному набору.** CLI отвечает `{"answer", "digest"}`, где digest взят из показанного предпросмотра; tool на resume заново собирает кандидатов и сравнивает (`sha256` от `id@updated_at`). Несовпадение → `Decision.STALE` → `CANCELLED: the set ... changed`. `require` возвращает `Decision` (approved/rejected/stale), а не bool.
+- **Принуждение к подтверждению в коде, а не в соглашении.** Реестр оборачивает функцию tool с `requires_confirmation=True` в scope подтверждения. `require` вне такого scope → `ConfirmationError` (tool без флага не может спрашивать); побочное действие вызывает `ensure_approved(action)`, которое падает, если `require` в этом же вызове не вернул approved. Оба нарушения покрыты тестами.
+- Аудит: `confirmation_requested` пишется, только когда граф реально встал на паузу (в `except GraphInterrupt`), поэтому на resume не дублируется; дальше `confirmation_approved|rejected|stale` и сам эффект (`reports_deleted`, `report_exported`) с `trace_id`.
+- `AgentSession`: `TurnOutcome.pending` (вопрос, summary, превью объектов, digest), `pending()` (переживает перезапуск — interrupt хранится в checkpoint), `resume(answers)` (неотвеченные = no). Новое сообщение при висящем подтверждении сначала отменяет его (D12). Таблица `conversations` ведётся в `run_turn`, `switch_conversation` проверяет владельца (`ConversationAccessError`) — заготовка для `/resume` шага 10.
+- `session_report_ids` — с reducer'ом (параллельные `save_report` не затирают друг друга); удалённые отчёты остаются в списке, но в промпт попадают только живые (заголовки берутся из storage). `save_report` маскирует title/content/entities; `source_queries` = SQL текущего хода + `analysis_context.sql` (через `InjectedState`).
+- Чужой и несуществующий отчёт неразличимы (`NOT_FOUND`, а при удалении — в `not_found` с пояснением «missing or someone else's»). Поиск экранирует `%`/`_` в `LIKE`. ID отчёта — 8 hex-символов (удобно называть в чате).
+- `export_report` пишет в `EXPORTS_DIR` (новая настройка, по умолчанию `exports/`). D14 («экспорт не делаем») относится к форматам; этот tool — демонстрация расширяемости из §301 ТЗ / A33.
+- Найдено при живой проверке: классификатор input guard (Flash-Lite) относил «Delete all reports from this conversation» к `malicious` (в описании было «delete warehouse data»). Уточнено: управление своими отчётами — `report_management`, `malicious` — только данные магазина. Добавлен network-тест на живом классификаторе.
+- Проверено вживую (`ceo`): сохранено 2 отчёта → «delete all reports from this conversation» → таблица-превью и `Delete 2 reports? [y/N]` → вместо ответа новый вопрос: удаление отменено, вопрос обработан → повторный запрос → `y` → `DELETED: 2 reports`; в `audit_log` цепочка requested → rejected / requested → approved → reports_deleted.
+
 **Готово, когда:** в CLI можно сохранить 2 отчёта, удалить «все отчёты этого разговора» с подтверждением и увидеть запись в `audit_log`.
 
 ---

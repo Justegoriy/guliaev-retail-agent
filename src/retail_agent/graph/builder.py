@@ -7,10 +7,14 @@
 `thread_id = conversation_id`: history and state survive restarts in `checkpoints.db`.
 The user's message is PII-masked before it enters the state, so neither checkpoints
 nor traces ever contain what the user typed in as personal data.
+
+Tools that need the user's confirmation pause the graph with `interrupt()`; the session
+reports them as `TurnOutcome.pending` and continues with `resume(answers)`.
 """
 
 import sqlite3
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -23,10 +27,12 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
+from langgraph.types import Command
 from pydantic import BaseModel
 
 from retail_agent.auth import UserContext
 from retail_agent.data.bigquery import BigQueryRunner
+from retail_agent.data.storage import Storage
 from retail_agent.graph.nodes import (
     AgentDeps,
     AgentNodes,
@@ -77,10 +83,23 @@ def open_checkpointer(path: Path) -> SqliteSaver:
 
 
 @dataclass(frozen=True)
+class PendingConfirmation:
+    """The graph is paused in a tool that waits for the user's yes/no."""
+
+    interrupt_id: str
+    action: str  # delete_reports | export_report | ...
+    question: str  # e.g. "Delete 2 reports?"
+    summary: str
+    items: list[dict[str, Any]]
+    digest: str
+
+
+@dataclass(frozen=True)
 class TurnOutcome:
     answer: str
     blocked: bool
     trace_id: str
+    pending: tuple[PendingConfirmation, ...] = ()  # non-empty: answer them via `resume`
 
 
 class AgentSession:
@@ -102,7 +121,14 @@ class AgentSession:
     def user(self) -> UserContext:
         return self.deps.tool_ctx.user
 
+    @property
+    def storage(self) -> Storage | None:
+        return self.deps.tool_ctx.storage
+
     def switch_conversation(self, conversation_id: str) -> None:
+        """Raises `ConversationAccessError` for another user's conversation."""
+        if self.storage is not None:
+            self.storage.check_conversation_owner(conversation_id, self.user.user_id)
         self.conversation_id = conversation_id
         self.deps.tool_ctx.conversation_id = conversation_id
         logger.conversation_id_var.set(conversation_id)
@@ -122,14 +148,52 @@ class AgentSession:
         config["recursion_limit"] = self.settings.max_agent_steps * 2 + FIXED_STEPS
         return config
 
+    def _snapshot(self):
+        return self.graph.get_state({"configurable": {"thread_id": self.conversation_id}})
+
     def state(self) -> dict[str, Any]:
-        snapshot = self.graph.get_state({"configurable": {"thread_id": self.conversation_id}})
-        return dict(snapshot.values)
+        return dict(self._snapshot().values)
+
+    def pending(self) -> tuple[PendingConfirmation, ...]:
+        """Confirmations the conversation is waiting for (also after a restart)."""
+        out = []
+        for item in self._snapshot().interrupts:
+            value = item.value if isinstance(item.value, dict) else {}
+            if value.get("type") != "confirm":
+                continue
+            out.append(
+                PendingConfirmation(
+                    interrupt_id=item.id,
+                    action=str(value.get("action", "")),
+                    question=str(value.get("question", "Proceed?")),
+                    summary=str(value.get("summary", "")),
+                    items=list(value.get("items") or []),
+                    digest=str(value.get("digest", "")),
+                )
+            )
+        return tuple(out)
+
+    def _outcome(self, values: dict[str, Any], trace_id: str) -> TurnOutcome:
+        pending = self.pending()
+        if pending:
+            return TurnOutcome(answer="", blocked=False, trace_id=trace_id, pending=pending)
+        last = values["messages"][-1]
+        answer = last.text if isinstance(last, AIMessage) else ""
+        return TurnOutcome(answer=answer, blocked=bool(values.get("blocked")), trace_id=trace_id)
 
     def run_turn(self, text: str, trace_id: str | None = None) -> TurnOutcome:
-        """Run one turn; raises on failures the CLI turns into user messages."""
+        """Run one turn; raises on failures the CLI turns into user messages.
+
+        A confirmation left unanswered (D12: it lives until the next user input) is
+        cancelled first, so the new message never resumes it by accident.
+        """
         trace_id = trace_id or logger.new_trace_id()
+        if self.pending():
+            log_event("confirmation_superseded", level="warning")
+            self.resume({}, trace_id)
         masked, _ = pii.mask_text(text, where="user_input")
+        if self.storage is not None:
+            self.storage.record_turn(self.conversation_id, self.user.user_id, masked)
         turn_input = {
             "messages": [HumanMessage(masked)],
             "trace_id": trace_id,
@@ -137,9 +201,24 @@ class AgentSession:
             "guard": None,
         }
         values = self.graph.invoke(turn_input, self.config(trace_id))
-        last = values["messages"][-1]
-        answer = last.text if isinstance(last, AIMessage) else ""
-        return TurnOutcome(answer=answer, blocked=bool(values.get("blocked")), trace_id=trace_id)
+        return self._outcome(values, trace_id)
+
+    def resume(self, answers: Mapping[str, str], trace_id: str | None = None) -> TurnOutcome:
+        """Answer the pending confirmations (interrupt id -> user's text) and continue.
+
+        Unanswered ones count as "no". Each answer carries the digest of the preview the
+        user saw, so the tool can tell whether its targets changed in the meantime.
+        """
+        trace_id = trace_id or self.state().get("trace_id") or logger.new_trace_id()
+        logger.trace_id_var.set(trace_id)
+        replies = {
+            p.interrupt_id: {"answer": answers.get(p.interrupt_id, "no"), "digest": p.digest}
+            for p in self.pending()
+        }
+        if not replies:
+            raise RuntimeError("there is no pending confirmation to answer")
+        values = self.graph.invoke(Command(resume=replies), self.config(trace_id))
+        return self._outcome(values, trace_id)
 
 
 def _aux_factory(settings: Settings):
@@ -153,7 +232,7 @@ def _aux_factory(settings: Settings):
 def create_session(
     user: UserContext, settings: Settings, conversation_id: str | None = None
 ) -> AgentSession:
-    """Production wiring: BigQuery, schema, tools, Gemini models, SQLite checkpoints."""
+    """Production wiring: BigQuery, schema, tools, Gemini models, SQLite storage/checkpoints."""
     runner = BigQueryRunner.from_settings(settings)
     schema = SchemaCatalog.load(runner)
     tool_ctx = ToolContext(
@@ -162,6 +241,7 @@ def create_session(
         runner=runner,
         schema=schema,
         settings=settings,
+        storage=Storage(settings.app_db_path),
     )
     tools = build_tools(tool_ctx)
     deps = AgentDeps(

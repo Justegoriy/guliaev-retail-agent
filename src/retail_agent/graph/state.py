@@ -4,9 +4,14 @@ The user is not part of the state: it comes from the running session, so a resum
 conversation is always served with the current user's access rights.
 """
 
-from typing import TypedDict
+from typing import Annotated, TypedDict
 
 from langgraph.graph import MessagesState
+
+
+def append_unique(current: list[str] | None, new: list[str] | None) -> list[str]:
+    """Reducer: several save_report calls of one step each add their id."""
+    return list(dict.fromkeys([*(current or []), *(new or [])]))
 
 
 class AnalysisContext(TypedDict):
@@ -33,4 +38,4 @@ class AgentState(MessagesState):
     guard: GuardDecision | None
     analysis_context: AnalysisContext | None
     history_summary: str | None
-    session_report_ids: list[str]
+    session_report_ids: Annotated[list[str], append_unique]  # saved here; deleted ones stay

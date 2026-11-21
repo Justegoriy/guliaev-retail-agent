@@ -12,7 +12,12 @@ from rich.markdown import Markdown
 from rich.table import Table
 
 from retail_agent import auth, errors
-from retail_agent.graph.builder import AgentSession, create_session
+from retail_agent.graph.builder import (
+    AgentSession,
+    PendingConfirmation,
+    TurnOutcome,
+    create_session,
+)
 from retail_agent.observability import logger, tracing
 from retail_agent.observability.logger import log_event
 from retail_agent.settings import get_settings
@@ -64,17 +69,52 @@ def _make_reader() -> Callable[[str], str]:
     return input
 
 
-def _run_turn(session: AgentSession, text: str) -> None:
-    trace_id = logger.new_trace_id()
-    log_event("turn_start", length=len(text))
-    started = time.perf_counter()
+def looks_like_new_message(answer: str) -> bool:
+    """An answer to a y/N question that is really a new request (D12, scenario A32)."""
+    return "?" in answer or len(answer.split()) > 3
+
+
+def _show_confirmation(pending: PendingConfirmation) -> None:
+    table = Table(title=pending.summary or None, show_lines=False)
+    for column in ("id", "title", "created (UTC)", "preview"):
+        table.add_column(column, overflow="fold")
+    for item in pending.items:
+        created = str(item.get("created_at", ""))[:16].replace("T", " ")
+        table.add_row(
+            str(item.get("id", "")),
+            str(item.get("title", "")),
+            created,
+            str(item.get("snippet", "")),
+        )
+    console.print(table)
+
+
+def _ask_confirmations(
+    pending: tuple[PendingConfirmation, ...], read: Callable[[str], str]
+) -> tuple[dict[str, str], str | None]:
+    """Ask each question outside the LLM; returns the answers and a new message, if typed."""
+    answers: dict[str, str] = {}
+    for item in pending:
+        _show_confirmation(item)
+        try:
+            answer = read(f"{item.question} [y/N] ").lstrip("\ufeff").strip()
+        except (EOFError, KeyboardInterrupt):
+            answer = "no"
+        if looks_like_new_message(answer):
+            log_event("confirmation_replaced_by_message", action=item.action)
+            return {}, answer  # unanswered confirmations count as "no"
+        answers[item.interrupt_id] = answer
+    return answers, None
+
+
+def _call(action: Callable[[], TurnOutcome], trace_id: str) -> TurnOutcome | None:
+    """Run a graph call; on failure print the user message, log `turn_end` and return None."""
     try:
         with console.status("Thinking..."):
-            outcome = session.run_turn(text, trace_id)
+            return action()
     except GraphRecursionError:
         log_event("turn_end", level="warning", status="error", error_kind="step_limit")
         console.print(f"[yellow]{STEP_LIMIT_MESSAGE}[/yellow] [dim](trace: {trace_id})[/dim]")
-        return
     except Exception as exc:
         kind = errors.classify(exc)
         log_event(
@@ -86,17 +126,32 @@ def _run_turn(session: AgentSession, text: str) -> None:
             detail=str(exc)[:500],
         )
         console.print(f"[red]{errors.user_message(kind, trace_id)}[/red]")
-        return
-    log_event(
-        "turn_end",
-        status="blocked" if outcome.blocked else "ok",
-        latency_ms=int((time.perf_counter() - started) * 1000),
-        sql_count=len(session.deps.tool_ctx.turn.executed),
-        sql_failures=session.deps.tool_ctx.turn.sql_failures,
-        bq_bytes=session.deps.tool_ctx.turn.bq_bytes,
-    )
-    console.print(Markdown(outcome.answer))
-    console.print(f"[dim]trace: {trace_id}[/dim]")
+    return None
+
+
+def _run_turn(session: AgentSession, text: str, read: Callable[[str], str]) -> None:
+    trace_id = logger.new_trace_id()
+    log_event("turn_start", length=len(text))
+    started = time.perf_counter()
+    outcome = _call(lambda: session.run_turn(text, trace_id), trace_id)
+    next_message: str | None = None
+    while outcome is not None and outcome.pending:
+        answers, typed = _ask_confirmations(outcome.pending, read)
+        next_message = next_message or typed
+        outcome = _call(lambda answers=answers: session.resume(answers, trace_id), trace_id)
+    if outcome is not None:
+        log_event(
+            "turn_end",
+            status="blocked" if outcome.blocked else "ok",
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            sql_count=len(session.deps.tool_ctx.turn.executed),
+            sql_failures=session.deps.tool_ctx.turn.sql_failures,
+            bq_bytes=session.deps.tool_ctx.turn.bq_bytes,
+        )
+        console.print(Markdown(outcome.answer))
+        console.print(f"[dim]trace: {trace_id}[/dim]")
+    if next_message:
+        _run_turn(session, next_message, read)
 
 
 def _repl(session: AgentSession) -> None:
@@ -116,7 +171,7 @@ def _repl(session: AgentSession) -> None:
             continue
         if text.lower() in EXIT_COMMANDS:
             break
-        _run_turn(session, text)
+        _run_turn(session, text, read)
 
 
 def main(argv: list[str] | None = None) -> int:

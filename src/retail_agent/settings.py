@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     # Storage & logs (relative paths are resolved against the project root)
     app_db_path: Path = Path("data/app.db")
     checkpoint_db_path: Path = Path("data/checkpoints.db")
+    exports_dir: Path = Path("exports")
     log_path: Path = Path("logs/agent.jsonl")
     log_llm_payloads: bool = True
 
@@ -63,7 +64,7 @@ class Settings(BaseSettings):
     def _empty_to_none(cls, value):
         return value or None
 
-    @field_validator("app_db_path", "checkpoint_db_path", "log_path")
+    @field_validator("app_db_path", "checkpoint_db_path", "exports_dir", "log_path")
     @classmethod
     def _resolve_path(cls, value: Path) -> Path:
         return value if value.is_absolute() else PROJECT_ROOT / value

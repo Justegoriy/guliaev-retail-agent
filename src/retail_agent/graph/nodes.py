@@ -14,6 +14,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.prebuilt.tool_node import ToolInvocationError
+from langgraph.types import Send
 from pydantic import BaseModel
 
 from retail_agent.graph import memory
@@ -31,13 +32,8 @@ from retail_agent.tools.registry import ToolContext
 
 # schema -> runnable that takes a prompt and returns an instance of the schema
 AuxFactory = Callable[[type[BaseModel]], Runnable[Any, Any]]
-ReportLookup = Callable[[Sequence[str]], list[SessionReport]]
 
 EMPTY_ANSWER = "I could not produce an answer this time. Please rephrase the question."
-
-
-def _reports_by_id(ids: Sequence[str]) -> list[SessionReport]:
-    return [SessionReport(report_id=i, title="(untitled)") for i in ids]
 
 
 @dataclass
@@ -49,7 +45,14 @@ class AgentDeps:
     aux: AuxFactory | None = None  # None: rules-only guard, no context extraction/summaries
     prompt_sources: PromptSources = field(default_factory=PromptSources)
     today: Callable[[], date] = date.today
-    session_reports: ReportLookup = _reports_by_id
+
+    def session_reports(self, ids: Sequence[str]) -> list[SessionReport]:
+        """Reports of this conversation that still exist, with their titles."""
+        storage = self.tool_ctx.storage
+        if storage is None:
+            return [SessionReport(report_id=i, title="(untitled)") for i in ids]
+        reports = storage.get_reports(self.tool_ctx.user.user_id, ids)
+        return [SessionReport(report_id=r.id, title=r.title) for r in reports]
 
 
 def tool_error_message(exc: Exception) -> str:
@@ -217,9 +220,13 @@ def route_after_guard(state: AgentState) -> str:
     return "output_guard" if state.get("blocked") else "agent"
 
 
-def route_after_agent(state: AgentState) -> str:
+def route_after_agent(state: AgentState) -> str | list[Send]:
+    """One `tools` task per tool call: when a call pauses for confirmation, the calls that
+    already finished in the same step keep their results and are not re-run on resume."""
     last = state["messages"][-1]
-    return "tools" if isinstance(last, AIMessage) and last.tool_calls else "output_guard"
+    if isinstance(last, AIMessage) and last.tool_calls:
+        return [Send("tools", [call]) for call in last.tool_calls]
+    return "output_guard"
 
 
 def route_after_output(state: AgentState) -> str:

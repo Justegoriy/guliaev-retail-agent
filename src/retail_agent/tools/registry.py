@@ -9,13 +9,14 @@ that registers its specs; the graph and the prompt do not change.
 import threading
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any
 
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, StructuredTool
 
 from retail_agent.auth import UserContext
 from retail_agent.data.bigquery import BigQueryRunner
+from retail_agent.data.storage import Storage
 from retail_agent.knowledge.schema import SchemaCatalog
+from retail_agent.safety import confirmation
 from retail_agent.settings import Settings, get_settings
 
 
@@ -81,7 +82,7 @@ class ToolContext:
     runner: BigQueryRunner
     schema: SchemaCatalog
     settings: Settings = field(default_factory=get_settings)
-    storage: Any = None
+    storage: Storage | None = None  # needed only by the report tools, checked when they run
     turn: TurnState = field(default_factory=TurnState)
 
 
@@ -121,6 +122,11 @@ def _build(spec: ToolSpec, ctx: ToolContext) -> BaseTool:
     tool = spec.factory(ctx)
     if tool.name != spec.name:
         raise ValueError(f"Factory of {spec.name!r} built a tool named {tool.name!r}")
+    if spec.requires_confirmation:
+        if not isinstance(tool, StructuredTool) or tool.func is None:
+            raise ValueError(f"{spec.name!r} requires confirmation, so it must be a sync tool")
+        # Only inside this scope can the tool ask the user and perform its side effect.
+        tool.func = confirmation.scoped(spec.name, tool.func)
     # Tool metadata reaches the callbacks, so `tool_call` log events carry these flags.
     tool.metadata = {
         **(tool.metadata or {}),
