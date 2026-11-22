@@ -1,4 +1,4 @@
-"""Application database (SQLite): saved reports, conversations, audit log.
+"""Application database (SQLite): saved reports, conversations, audit log, user preferences.
 
 Every report query is scoped to its owner and skips soft-deleted rows: the repository
 has no method that returns another user's report, so ownership cannot be forgotten in
@@ -50,6 +50,30 @@ CREATE TABLE IF NOT EXISTS audit_log (
     details TEXT NOT NULL DEFAULT '{}',
     trace_id TEXT
 );
+
+CREATE TABLE IF NOT EXISTS user_preferences (
+    user_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('explicit', 'inferred')),
+    confidence REAL NOT NULL,
+    evidence_count INTEGER NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS preference_signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    weight REAL NOT NULL,
+    kind TEXT NOT NULL,
+    conversation_id TEXT,
+    trace_id TEXT,
+    ts TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS preference_signals_user ON preference_signals (user_id, key);
 """
 
 MAX_TITLE_CHARS = 200
@@ -97,6 +121,33 @@ class AuditEntry:
     target_ids: tuple[str, ...]
     details: dict[str, Any]
     trace_id: str | None
+
+
+PreferenceValue = str | list[str]
+
+
+@dataclass(frozen=True)
+class StoredPreference:
+    user_id: str
+    key: str
+    value: PreferenceValue
+    source: str  # explicit | inferred
+    confidence: float
+    evidence_count: int
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class StoredSignal:
+    id: int
+    user_id: str
+    key: str
+    value: PreferenceValue
+    weight: float
+    kind: str  # explicit_request | reformat_request | feedback | usage
+    conversation_id: str | None
+    trace_id: str | None
+    ts: str
 
 
 def _now() -> str:
@@ -304,6 +355,101 @@ class Storage:
                 json.dumps(details or {}, ensure_ascii=False, default=str),
                 trace_id,
             ),
+        )
+
+    # -- user preferences --------------------------------------------------------------------
+
+    def get_preferences(self, user_id: str) -> list[StoredPreference]:
+        rows = self._query(
+            "SELECT * FROM user_preferences WHERE user_id = ? ORDER BY key", (user_id,)
+        )
+        return [StoredPreference(**{**dict(r), "value": json.loads(r["value"])}) for r in rows]
+
+    def get_preference(self, user_id: str, key: str) -> StoredPreference | None:
+        return next((p for p in self.get_preferences(user_id) if p.key == key), None)
+
+    def upsert_preference(
+        self,
+        user_id: str,
+        key: str,
+        value: PreferenceValue,
+        *,
+        source: str,
+        confidence: float,
+        evidence_count: int,
+    ) -> StoredPreference:
+        self._write(
+            "INSERT INTO user_preferences "
+            "(user_id, key, value, source, confidence, evidence_count, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value, "
+            "source = excluded.source, confidence = excluded.confidence, "
+            "evidence_count = excluded.evidence_count, updated_at = excluded.updated_at",
+            (
+                user_id,
+                key,
+                json.dumps(value, ensure_ascii=False),
+                source,
+                confidence,
+                evidence_count,
+                _now(),
+            ),
+        )
+        stored = self.get_preference(user_id, key)
+        assert stored is not None
+        return stored
+
+    def delete_preferences(self, user_id: str, key: str | None = None) -> int:
+        """Delete one key (or all keys) of the user; returns the number of rows deleted."""
+        if key is None:
+            return self._write("DELETE FROM user_preferences WHERE user_id = ?", (user_id,))
+        return self._write(
+            "DELETE FROM user_preferences WHERE user_id = ? AND key = ?", (user_id, key)
+        )
+
+    def add_signal(
+        self,
+        user_id: str,
+        key: str,
+        value: PreferenceValue,
+        *,
+        weight: float,
+        kind: str,
+        conversation_id: str | None = None,
+        trace_id: str | None = None,
+        ts: str | None = None,
+    ) -> None:
+        self._write(
+            "INSERT INTO preference_signals "
+            "(user_id, key, value, weight, kind, conversation_id, trace_id, ts) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                user_id,
+                key,
+                json.dumps(value, ensure_ascii=False),
+                weight,
+                kind,
+                conversation_id,
+                trace_id,
+                ts or _now(),
+            ),
+        )
+
+    def signals(self, user_id: str, key: str | None = None) -> list[StoredSignal]:
+        """Oldest first."""
+        sql = "SELECT * FROM preference_signals WHERE user_id = ?"
+        params: list[Any] = [user_id]
+        if key is not None:
+            sql += " AND key = ?"
+            params.append(key)
+        rows = self._query(sql + " ORDER BY id", params)
+        return [StoredSignal(**{**dict(r), "value": json.loads(r["value"])}) for r in rows]
+
+    def delete_signals(self, user_id: str, key: str | None = None) -> int:
+        if key is None:
+            return self._write("DELETE FROM preference_signals WHERE user_id = ?", (user_id,))
+        return self._write(
+            "DELETE FROM preference_signals WHERE user_id = ? AND key = ?", (user_id, key)
         )
 
     def audit_entries(self, user_id: str | None = None, limit: int = 100) -> list[AuditEntry]:

@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     golden_index_path: Path = Path("data/golden_index.npz")
     golden_candidates_path: Path = Path("data/golden_candidates.jsonl")
 
+    # User preferences (keys, values, thresholds)
+    preferences_config_path: Path = Path("config/preferences.yaml")
+
     # Storage & logs (relative paths are resolved against the project root)
     app_db_path: Path = Path("data/app.db")
     checkpoint_db_path: Path = Path("data/checkpoints.db")
@@ -81,6 +84,7 @@ class Settings(BaseSettings):
         "golden_trios_path",
         "golden_index_path",
         "golden_candidates_path",
+        "preferences_config_path",
     )
     @classmethod
     def _resolve_path(cls, value: Path) -> Path:

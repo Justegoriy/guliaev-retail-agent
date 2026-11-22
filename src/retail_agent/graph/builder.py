@@ -48,6 +48,14 @@ from retail_agent.knowledge.schema import SchemaCatalog
 from retail_agent.llm import build_chat_model
 from retail_agent.observability import logger, tracing
 from retail_agent.observability.logger import log_event
+from retail_agent.personalization import profile as preference_profile
+from retail_agent.personalization import signals
+from retail_agent.personalization.profile import (
+    Preference,
+    PreferenceRejected,
+    Preferences,
+    UserProfile,
+)
 from retail_agent.safety import pii
 from retail_agent.settings import Settings
 from retail_agent.tools import ToolContext, build_tools
@@ -211,18 +219,80 @@ class AgentSession:
         values = self.graph.invoke(turn_input, self.config(trace_id))
         return self._outcome(values, trace_id)
 
-    def mark_good(self) -> FeedbackResult:
-        """`/good` on the last answer: if it is backed by successful SQL, it becomes a
-        Golden Bucket candidate for analysts to review (question, SQL, answer summary)."""
+    @property
+    def preferences(self) -> Preferences | None:
+        return self.deps.tool_ctx.preferences
+
+    def _require_preferences(self) -> Preferences:
+        if self.preferences is None:
+            raise PreferenceRejected("preferences are not available in this session")
+        return self.preferences
+
+    def profile(self) -> UserProfile:
+        prefs = self.preferences
+        return prefs.get_profile(self.user.user_id) if prefs else UserProfile()
+
+    def set_preference(self, key: str, value: str) -> Preference:
+        """`/prefs set`; raises `PreferenceRejected` with a reason for the user."""
+        return self._require_preferences().set_explicit(
+            self.user.user_id, key, value, via="cli", conversation_id=self.conversation_id
+        )
+
+    def forget_preference(self, key: str) -> bool:
+        return self._require_preferences().forget(self.user.user_id, key)
+
+    def reset_preferences(self) -> int:
+        return self._require_preferences().reset(self.user.user_id)
+
+    def _feedback(self, rating: str, comment: str = "") -> tuple[dict[str, Any], str]:
+        """Log the feedback on the last answer and turn it into preference signals."""
         state = self.state()
         trace_id = state.get("trace_id")
         if trace_id:
             logger.trace_id_var.set(trace_id)  # the feedback belongs to the answer's trace
-        log_event("feedback", rating="good")
+        comment = pii.mask_text(comment, where="feedback")[0][:300]
+        log_event("feedback", rating=rating, **({"comment": comment} if comment else {}))
+        answer = memory.final_answer(memory.current_turn(state.get("messages") or []))
+        prefs = self.preferences
+        if prefs is not None and answer:
+            try:
+                rated = any(
+                    s.kind == "feedback" and s.trace_id == trace_id
+                    for s in prefs.storage.signals(self.user.user_id)
+                )
+                if rated:  # one answer gives at most one feedback signal set
+                    return state, answer
+                prefs.add_signals(
+                    self.user.user_id,
+                    signals.feedback_signals(rating, answer, comment),
+                    conversation_id=self.conversation_id,
+                    trace_id=trace_id,
+                )
+            except Exception as exc:
+                log_event(
+                    "preference_extraction_failed",
+                    level="warning",
+                    stage="feedback",
+                    error=type(exc).__name__,
+                )
+        return state, answer
+
+    def mark_bad(self, comment: str = "") -> FeedbackResult:
+        """`/bad [comment]`: logged for analysis; "too long" and the like adjust the profile."""
+        _, answer = self._feedback("bad", comment)
+        if not answer:
+            return FeedbackResult("Thanks for the feedback! There is no answer to rate yet.")
+        hint = "" if comment else " Add a comment next time, e.g. /bad too long."
+        return FeedbackResult(f"Thanks for the feedback, it helps to improve the answers.{hint}")
+
+    def mark_good(self) -> FeedbackResult:
+        """`/good` on the last answer: if it is backed by successful SQL, it becomes a
+        Golden Bucket candidate for analysts to review (question, SQL, answer summary)."""
+        state, answer = self._feedback("good")
+        trace_id = state.get("trace_id")
         thanks = "Thanks for the feedback!"
         messages = state.get("messages") or []
         turn = memory.current_turn(messages)
-        answer = memory.final_answer(turn)
         succeeded = any(
             isinstance(m, ToolMessage) and m.name == "run_sql" and m.text.startswith("OK")
             for m in turn
@@ -304,13 +374,17 @@ def create_session(
     """Production wiring: BigQuery, schema, tools, Gemini models, SQLite storage/checkpoints."""
     runner = BigQueryRunner.from_settings(settings)
     schema = SchemaCatalog.load(runner)
+    storage = Storage(settings.app_db_path)
     tool_ctx = ToolContext(
         user=user,
         conversation_id=conversation_id or "",
         runner=runner,
         schema=schema,
         settings=settings,
-        storage=Storage(settings.app_db_path),
+        storage=storage,
+        preferences=Preferences(
+            storage, preference_profile.load_config(settings.preferences_config_path)
+        ),
     )
     tools = build_tools(tool_ctx)
     deps = AgentDeps(

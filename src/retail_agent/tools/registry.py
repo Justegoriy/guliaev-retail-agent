@@ -16,6 +16,7 @@ from retail_agent.auth import UserContext
 from retail_agent.data.bigquery import BigQueryRunner
 from retail_agent.data.storage import Storage
 from retail_agent.knowledge.schema import SchemaCatalog
+from retail_agent.personalization.profile import Preferences
 from retail_agent.safety import confirmation
 from retail_agent.settings import Settings, get_settings
 
@@ -83,6 +84,7 @@ class ToolContext:
     schema: SchemaCatalog
     settings: Settings = field(default_factory=get_settings)
     storage: Storage | None = None  # needed only by the report tools, checked when they run
+    preferences: Preferences | None = None  # None: no personalization (preference tools say so)
     turn: TurnState = field(default_factory=TurnState)
 
 

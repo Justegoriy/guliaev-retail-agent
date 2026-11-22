@@ -1,0 +1,81 @@
+# User preference profile (D16, TZ §3.4.1): the only keys and values that can be stored.
+#
+# A value given by the user, the agent or the signal extractor is normalised through
+# `values` (canonical value -> aliases); anything else is rejected. Free-text values
+# (type text, and list keys without `values`) are length-limited and checked for prompt
+# injection, personal data and attempts to change the rules.
+# `hint` / `value_hints` are added to the prompt next to the value.
+
+inferred_threshold: 0.7    # share of the key's (decayed) signal weight the value needs
+min_evidence: 2            # ...and the number of distinct turns supporting it
+half_life_days: 30         # a signal's weight halves every 30 days
+list_item_threshold: 0.25  # list keys: an item's share of the key's weight
+list_min_evidence: 3       # list keys: distinct turns per item
+
+signal_weights:
+  explicit_request: 1.0    # the user set the value explicitly (tool or /prefs set)
+  reformat_request: 1.0    # "shorter, please", "as a table" (from the post-turn extractor)
+  feedback: 0.6            # /good and /bad on an answer
+  usage: 0.3               # metrics and segments of the analyses the user runs
+
+keys:
+  format:
+    type: enum
+    description: layout of answers
+    values:
+      table: [tables, tabular, grid]
+      bullets: [bullet, bullet points, bulleted, list, lists, bulleted list]
+      prose: [text, paragraphs, narrative, plain text]
+    value_hints:
+      table: Present the numbers in a Markdown table.
+      bullets: >-
+        Present the numbers as bullet points, not as a table, even when there are many
+        (this overrides the persona's table guidance).
+      prose: >-
+        Write short paragraphs without tables or bullet lists (this overrides the
+        persona's table guidance).
+  detail_level:
+    type: enum
+    description: length and depth of answers
+    values:
+      brief: [short, shorter, concise, terse, brief answers, summary only]
+      standard: [normal, default, medium]
+      deep: [detailed, more detail, in depth, in-depth, thorough, long]
+    value_hints:
+      brief: Keep answers short - the key numbers and one or two takeaways.
+      deep: Give fuller answers - drivers, breakdowns and caveats.
+  visuals:
+    type: enum
+    description: charts or text
+    values:
+      charts: [chart, graphs, graph, plots, plot, visual, visuals]
+      text: [no charts, text only]
+    value_hints:
+      charts: >-
+        Charts are not available in this prototype; use a compact table and say that
+        charts come with the production version.
+  report_structure:
+    type: text
+    description: how saved reports are structured (free text)
+    max_chars: 200
+    hint: Apply to the structure of the reports you write.
+  focus_metrics:
+    type: list
+    description: metrics the user cares about
+    max_items: 5
+    values:
+      revenue: [sales, gmv, turnover]
+      margin: [gross margin, profit, profitability, margins]
+      aov: [average order value, basket size]
+      return_rate: [returns, return rate, returned, refunds]
+      orders: [order count, number of orders]
+      units: [items sold, quantity, units sold]
+      customers: [buyers, active customers, customer count]
+      churn: [retention, attrition, churn rate]
+    hint: For broad questions, include these metrics.
+  focus_segments:
+    type: list
+    description: categories, brands, states or channels the user follows (free text)
+    max_items: 5
+    max_chars: 40
+    hint: For broad questions, mention these segments.

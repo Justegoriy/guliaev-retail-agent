@@ -18,10 +18,12 @@ from langgraph.types import Send
 from pydantic import BaseModel
 
 from retail_agent.graph import memory
-from retail_agent.graph.state import AgentState, GuardDecision
+from retail_agent.graph.state import AgentState, AnalysisContext, GuardDecision
 from retail_agent.knowledge import golden
 from retail_agent.knowledge.golden import CandidateStore, GoldenIndex
 from retail_agent.observability.logger import log_event
+from retail_agent.personalization import signals
+from retail_agent.personalization.profile import UserProfile
 from retail_agent.prompts.context import (
     PromptInputs,
     PromptSources,
@@ -38,6 +40,9 @@ AuxFactory = Callable[[type[BaseModel]], Runnable[Any, Any]]
 EMPTY_ANSWER = "I could not produce an answer this time. Please rephrase the question."
 # Turns that are not about the data get no precedents (saves an embedding call).
 NO_PRECEDENTS_CATEGORIES = frozenset({"greeting", "preferences", "report_management"})
+# Turns without SQL that still get the post-turn extraction call, because the message may
+# reveal a preference ("shorter, please", "as a table?"). Turns with SQL always get it.
+SIGNAL_CATEGORIES = frozenset({"follow_up", "preferences"})
 
 
 @dataclass
@@ -124,6 +129,17 @@ class AgentNodes:
             )
             return []
 
+    def profile(self) -> UserProfile:
+        """Read at the start of every turn, so a change applies to the very next answer."""
+        prefs = self.deps.tool_ctx.preferences
+        if prefs is None:
+            return UserProfile()
+        try:
+            return prefs.get_profile(self.deps.tool_ctx.user.user_id)
+        except Exception as exc:
+            log_event("preferences_unavailable", level="warning", error=type(exc).__name__)
+            return UserProfile()
+
     def system_prompt(self, state: AgentState) -> str:
         """Built once per turn: persona and glossary are re-read only if their files changed."""
         trace_id = state.get("trace_id") or ""
@@ -135,12 +151,15 @@ class AgentNodes:
         guard = state.get("guard") or {}
         report_ids = state.get("session_report_ids") or []
         precedents = self.precedents(state)
+        profile = self.profile()
+        prefs = deps.tool_ctx.preferences
         inputs = PromptInputs(
             user=deps.tool_ctx.user,
             today=deps.today(),
             schema=deps.tool_ctx.schema.schema_prompt(),
             persona=persona.text,
             glossary=glossary.text,
+            preferences=profile.prompt_block(prefs.config) if prefs else "",
             history_summary=state.get("history_summary"),
             analysis_context=state.get("analysis_context"),
             session_reports=deps.session_reports(report_ids) if report_ids else [],
@@ -153,6 +172,7 @@ class AgentNodes:
             persona_version=persona.version,
             glossary_version=glossary.version,
             golden_ids=[p.trio.id for p in precedents],
+            preferences=profile.labels(),
             chars=len(prompt),
             has_summary=bool(inputs.history_summary),
             has_analysis_context=bool(inputs.analysis_context),
@@ -213,18 +233,76 @@ class AgentNodes:
         log_event("answer", chars=len(masked.text), blocked=bool(state.get("blocked")))
         return {"messages": [masked]} if masked is not last else {}
 
+    def _extract(
+        self, state: AgentState, config: RunnableConfig
+    ) -> memory.ContextExtraction | None:
+        """The post-turn aux call: after successful SQL (analysis context), and on turns
+        that may carry preference signals ("shorter, please" usually runs no query)."""
+        executed = self.deps.tool_ctx.turn.executed
+        has_sql = any(q.source == "run_sql" for q in executed)
+        prefs = self.deps.tool_ctx.preferences
+        category = (state.get("guard") or {}).get("category")
+        signal_turn = prefs is not None and category in SIGNAL_CATEGORIES
+        extractor = self._aux_call(memory.ContextExtraction, config)
+        if extractor is None or not (has_sql or signal_turn):
+            return None
+        rules = signals.extraction_rules(prefs.config, self.profile().labels()) if prefs else ""
+        turn = memory.current_turn(state["messages"])
+        prompt = memory.extraction_prompt(turn, executed, state.get("analysis_context"), rules)
+        try:
+            return extractor(prompt)
+        except Exception as exc:
+            log_event("context_extraction_failed", level="warning", error=type(exc).__name__)
+            if prefs is not None:
+                log_event("preference_extraction_failed", level="warning", stage="extract")
+            return None
+
+    def _learn_preferences(
+        self,
+        state: AgentState,
+        extraction: memory.ContextExtraction | None,
+        context: AnalysisContext | None,
+    ) -> None:
+        prefs = self.deps.tool_ctx.preferences
+        if prefs is None:
+            return
+        found = signals.usage_signals(prefs.config, context)
+        if extraction is not None and extraction.preference_signals:
+            turns = memory.split_turns(state["messages"])
+            previous = memory.final_answer(turns[-2]) if len(turns) > 1 else ""
+            found += signals.from_extraction(
+                extraction.preference_signals,
+                message=memory.last_user_text(state["messages"]),
+                previous_answer_chars=len(previous) or None,
+            )
+        if not found:
+            return
+        try:
+            prefs.add_signals(
+                self.deps.tool_ctx.user.user_id,
+                found,
+                conversation_id=self.deps.tool_ctx.conversation_id,
+                trace_id=state.get("trace_id"),
+            )
+        except Exception as exc:
+            log_event(
+                "preference_extraction_failed",
+                level="warning",
+                stage="store",
+                error=type(exc).__name__,
+            )
+
     def update_context(self, state: AgentState, config: RunnableConfig) -> dict[str, Any]:
         messages = state["messages"]
         settings = self.deps.settings
         update: dict[str, Any] = {}
+        extraction = self._extract(state, config)
         context = memory.build_analysis_context(
-            memory.current_turn(messages),
-            self.deps.tool_ctx.turn.executed,
-            state.get("analysis_context"),
-            self._aux_call(memory.ContextExtraction, config),
+            memory.current_turn(messages), self.deps.tool_ctx.turn.executed, extraction
         )
         if context is not None:
             update["analysis_context"] = context
+        self._learn_preferences(state, extraction, context)
         folded = memory.summarize(
             messages,
             state.get("history_summary"),

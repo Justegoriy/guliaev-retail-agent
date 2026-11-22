@@ -135,7 +135,8 @@ Categories:
 - report_management: list, show, search, save, delete or export the user's saved reports, \
 including "delete all reports from this conversation" or "delete reports mentioning X" \
 (the assistant asks the user to confirm deletions itself)
-- preferences: how the assistant should format answers ("always use tables")
+- preferences: how the assistant should answer from now on or which metrics to focus on \
+("always use tables", "keep answers short", "forget my format preference")
 - greeting: hello, help, who are you
 - off_topic: unrelated to the store's data or reports (weather, coding help, general \
 knowledge, personal advice)

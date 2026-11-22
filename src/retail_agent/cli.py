@@ -20,6 +20,7 @@ from retail_agent.graph.builder import (
 )
 from retail_agent.observability import logger, tracing
 from retail_agent.observability.logger import log_event
+from retail_agent.personalization.profile import PreferenceRejected, display
 from retail_agent.settings import get_settings
 
 EXIT_COMMANDS = {"/exit", "/quit"}
@@ -165,6 +166,66 @@ def _good(session: AgentSession) -> None:
     console.print(f"[green]{result.message}[/green]")
 
 
+def _bad(session: AgentSession, comment: str) -> None:
+    try:
+        result = session.mark_bad(comment)
+    except Exception as exc:
+        kind = errors.classify(exc)
+        log_event("feedback_failed", level="error", error=type(exc).__name__, detail=str(exc)[:300])
+        console.print(f"[red]{errors.user_message(kind)}[/red]")
+        return
+    console.print(f"[green]{result.message}[/green]")
+
+
+def _show_profile(session: AgentSession) -> None:
+    profile = session.profile()
+    if not profile.items:
+        console.print("No saved preferences yet. Example: /prefs set format table")
+        return
+    table = Table(title="Your preferences", show_lines=False)
+    for column in ("key", "value", "source", "confidence", "updated (UTC)"):
+        table.add_column(column, overflow="fold")
+    for p in profile.items:
+        table.add_row(
+            p.key,
+            display(p.value),
+            p.source,
+            f"{p.confidence:.2f}",
+            p.updated_at[:16].replace("T", " "),
+        )
+    console.print(table)
+
+
+def _prefs(session: AgentSession, args: str) -> None:
+    """`/prefs`, `/prefs set <key> <value>`, `/prefs forget <key>`, `/prefs reset`."""
+    command, _, rest = args.strip().partition(" ")
+    key, _, value = rest.strip().partition(" ")
+    try:
+        if not command:
+            _show_profile(session)
+        elif command == "set" and key and value.strip():
+            saved = session.set_preference(key, value.strip())
+            console.print(f"[green]Saved: {saved.key} = {display(saved.value)}[/green]")
+        elif command == "forget" and key and not value:
+            done = session.forget_preference(key)
+            console.print(f"Forgot {key}." if done else f"{key} was not set.")
+        elif command == "reset" and not rest.strip():
+            removed = session.reset_preferences()
+            console.print(f"Preferences reset ({removed} removed).")
+        else:
+            allowed = session.preferences.config.describe() if session.preferences else "-"
+            console.print(
+                "Usage: /prefs | /prefs set <key> <value> | /prefs forget <key> | /prefs reset\n"
+                f"Keys: {allowed}"
+            )
+    except PreferenceRejected as exc:
+        console.print(f"[yellow]Not saved: {exc}[/yellow]")
+    except Exception as exc:
+        kind = errors.classify(exc)
+        log_event("preferences_command_failed", level="error", error=type(exc).__name__)
+        console.print(f"[red]{errors.user_message(kind)}[/red]")
+
+
 def _repl(session: AgentSession) -> None:
     user = session.user
     read = _make_reader()
@@ -182,8 +243,15 @@ def _repl(session: AgentSession) -> None:
             continue
         if text.lower() in EXIT_COMMANDS:
             break
-        if text.lower() == "/good":
+        command, _, args = text.partition(" ")
+        if command.lower() == "/good":
             _good(session)
+            continue
+        if command.lower() == "/bad":
+            _bad(session, args.strip())
+            continue
+        if command.lower() == "/prefs":
+            _prefs(session, args)
             continue
         _run_turn(session, text, read)
 

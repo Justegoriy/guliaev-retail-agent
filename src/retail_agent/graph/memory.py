@@ -5,7 +5,8 @@
   `FULL_TOOL_RESULT_TURNS` turns are cut to the status line and the first rows, and
   tool calls without results (an interrupted turn) are dropped, since Gemini rejects them.
 - `build_analysis_context`: after a turn with successful `run_sql`, the SQL and result
-  summary are taken deterministically, the question/period/filters by one aux-model call.
+  summary are taken deterministically, the question/period/filters from one post-turn
+  aux-model call (`extraction_prompt`), which also returns the user's preference signals.
 - `summarize`: past the threshold the oldest turns are folded into `history_summary`,
   leaving the last `HISTORY_KEEP_TURNS` turns verbatim.
 """
@@ -17,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from retail_agent.graph.state import AnalysisContext
 from retail_agent.observability.logger import log_event
+from retail_agent.personalization.signals import PreferenceSignalOut
 from retail_agent.safety import pii
 from retail_agent.tools.registry import ExecutedQuery
 
@@ -139,9 +141,12 @@ def prepare_history(
 
 
 class ContextExtraction(BaseModel):
+    """One post-turn aux call: the analysis context and the user's preference signals."""
+
     question: str = Field(
+        "",
         description="The user's analytical question, rewritten to be understandable on its "
-        "own (resolve 'it', 'the same', 'and for Swim?' using the previous topic)."
+        "own (resolve 'it', 'the same', 'and for Swim?' using the previous topic).",
     )
     period: str | None = Field(None, description="Analysed period, e.g. '2024, monthly'.")
     filters: list[str] = Field(
@@ -150,19 +155,45 @@ class ContextExtraction(BaseModel):
     entities: list[str] = Field(
         default_factory=list, description="Metrics, categories, brands or segments analysed."
     )
+    preference_signals: list[PreferenceSignalOut] = Field(
+        default_factory=list, description="Preference signals; usually none."
+    )
 
 
 EXTRACTION_PROMPT = """\
-Describe the analysis the assistant has just done, for use as context of the next turn.
+Describe the turn of a conversation with a data analyst assistant that has just ended. \
 Use only the information below; never include personal data.
 
+Analysis context: describe the analysis the assistant has just done (question, period, \
+filters, entities), for use as context of the next turn. If no queries were run, leave \
+these fields empty.
 Previous analysis topic: {previous}
 User's message: {message}
 Queries run (purpose): {purposes}
 Beginning of the assistant's answer:
 <<<
 {answer}
->>>"""
+>>>
+
+{preferences}"""
+
+NO_PREFERENCES = "Preference signals: always return an empty list."
+
+
+def extraction_prompt(
+    turn: Turn,
+    executed: Sequence[ExecutedQuery],
+    previous: AnalysisContext | None,
+    preference_rules: str = "",
+) -> str:
+    queries = [q for q in executed if q.source == "run_sql"]
+    return EXTRACTION_PROMPT.format(
+        previous=(previous or {}).get("question") or "none",
+        message=turn[0].text if turn else "",
+        purposes="; ".join(q.purpose for q in queries) or "none",
+        answer=final_answer(turn)[:800],
+        preferences=preference_rules or NO_PREFERENCES,
+    )
 
 
 def result_summary(turn: Turn) -> str:
@@ -180,26 +211,18 @@ def result_summary(turn: Turn) -> str:
 def build_analysis_context(
     turn: Turn,
     executed: Sequence[ExecutedQuery],
-    previous: AnalysisContext | None,
-    extractor: Callable[[str], ContextExtraction] | None,
+    extraction: ContextExtraction | None,
 ) -> AnalysisContext | None:
-    """New context after a turn with successful `run_sql`; None means "keep the old one"."""
+    """New context after a turn with successful `run_sql`; None means "keep the old one".
+
+    Without an extraction (no aux model, or it failed) the SQL and result summary are
+    still kept, with the user's message as the question.
+    """
     queries = [q for q in executed if q.source == "run_sql"]
     if not queries:
         return None
     message = turn[0].text if turn else ""
-    extraction = ContextExtraction(question=message)
-    if extractor is not None:
-        prompt = EXTRACTION_PROMPT.format(
-            previous=(previous or {}).get("question") or "none",
-            message=message,
-            purposes="; ".join(q.purpose for q in queries),
-            answer=final_answer(turn)[:800],
-        )
-        try:
-            extraction = extractor(prompt)
-        except Exception as exc:
-            log_event("context_extraction_failed", level="warning", error=type(exc).__name__)
+    extraction = extraction or ContextExtraction(question=message)
 
     def clean(text: str) -> str:
         return pii.mask_text(text)[0]

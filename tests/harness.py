@@ -20,6 +20,7 @@ from retail_agent.graph.memory import ContextExtraction, HistorySummary
 from retail_agent.graph.nodes import AgentDeps
 from retail_agent.knowledge.golden import CandidateStore
 from retail_agent.knowledge.schema import SchemaCatalog
+from retail_agent.personalization.profile import Preferences, load_config
 from retail_agent.prompts.context import PromptSources, ReloadingFile, glossary_text, persona_text
 from retail_agent.safety.input_guard import GuardVerdict
 from retail_agent.settings import Settings
@@ -145,6 +146,7 @@ class Harness:
             df=revenue_df(), sql="", bytes_processed=100, duration_ms=1, cache_hit=False
         )
         self.storage = Storage(self.settings.app_db_path)
+        self.preferences = Preferences(self.storage, load_config())
         self.model = ScriptedChat()
         self.aux = FakeAux() if aux else None
         self.persona = tmp_path / "persona.md"
@@ -169,6 +171,7 @@ class Harness:
             schema=make_schema(),
             settings=self.settings,
             storage=self.storage,
+            preferences=self.preferences,
         )
         deps = AgentDeps(
             tool_ctx=ctx,
