@@ -14,7 +14,7 @@ reports them as `TurnOutcome.pending` and continues with `resume(answers)`.
 
 import sqlite3
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -32,7 +32,7 @@ from pydantic import BaseModel
 
 from retail_agent.auth import UserContext
 from retail_agent.data.bigquery import BigQueryRunner
-from retail_agent.data.storage import Storage
+from retail_agent.data.storage import Conversation, ConversationAccessError, Report, Storage
 from retail_agent.graph import memory
 from retail_agent.graph.nodes import (
     AgentDeps,
@@ -62,6 +62,30 @@ from retail_agent.tools import ToolContext, build_tools
 
 # input_guard, output_guard and update_context run once per turn besides agent/tools steps.
 FIXED_STEPS = 3
+
+StageCallback = Callable[[str], None]
+STAGE_START = "Checking request..."
+CANCELLED_TEXT = "(The user cancelled this request before it finished.)"
+CANCELLED_TOOL_TEXT = "Cancelled by the user."
+DATA_TOOLS = frozenset({"run_sql", "get_company_benchmark", "describe_dataset"})
+
+
+def stage_after(node: str, update: Any) -> str | None:
+    """What the turn is doing next, after `node` produced `update` (for the CLI status)."""
+    if node == "input_guard":
+        return "Thinking..."
+    if node == "agent":
+        messages = (update.get("messages") or []) if isinstance(update, dict) else []
+        last = messages[-1] if messages else None
+        if isinstance(last, AIMessage) and last.tool_calls:
+            names = {c["name"] for c in last.tool_calls}
+            return "Querying BigQuery..." if names & DATA_TOOLS else "Working on it..."
+        return "Checking the answer..."
+    if node == "tools":
+        return "Writing answer..."
+    if node == "output_guard":
+        return "Updating conversation context..."
+    return None
 
 
 def build_graph(
@@ -189,6 +213,36 @@ class AgentSession:
             )
         return tuple(out)
 
+    def cancel_turn(self) -> None:
+        """Close a turn stopped mid-graph (Ctrl+C) so the thread stays valid.
+
+        Tool calls without results would make the next model request invalid, so they get
+        a "cancelled" result, and the turn ends with a short assistant note. A pending
+        confirmation is left alone: the next message supersedes it (D12).
+        """
+        snapshot = self._snapshot()
+        if not snapshot.next or self.pending():
+            return
+        messages = snapshot.values.get("messages") or []
+        answered = {m.tool_call_id for m in messages if isinstance(m, ToolMessage)}
+        closing: list[Any] = []
+        for message in reversed(messages):
+            if isinstance(message, HumanMessage):
+                break
+            if isinstance(message, AIMessage):
+                closing += [
+                    ToolMessage(CANCELLED_TOOL_TEXT, tool_call_id=c["id"], name=c["name"])
+                    for c in message.tool_calls
+                    if c["id"] not in answered
+                ]
+        closing.append(AIMessage(CANCELLED_TEXT))
+        self.graph.update_state(
+            {"configurable": {"thread_id": self.conversation_id}},
+            {"messages": closing},
+            as_node="update_context",
+        )
+        log_event("turn_cancelled", interrupted_at=list(snapshot.next))
+
     def _outcome(self, values: dict[str, Any], trace_id: str) -> TurnOutcome:
         pending = self.pending()
         if pending:
@@ -197,7 +251,22 @@ class AgentSession:
         answer = last.text if isinstance(last, AIMessage) else ""
         return TurnOutcome(answer=answer, blocked=bool(values.get("blocked")), trace_id=trace_id)
 
-    def run_turn(self, text: str, trace_id: str | None = None) -> TurnOutcome:
+    def _stream(self, graph_input: Any, trace_id: str, on_stage: StageCallback | None) -> dict:
+        """Run the graph, reporting progress after each node; returns the final state."""
+        stream = self.graph.stream(graph_input, self.config(trace_id), stream_mode="updates")
+        try:
+            for chunk in stream:
+                for node, update in chunk.items():
+                    stage = stage_after(node, update)
+                    if stage and on_stage is not None:
+                        on_stage(stage)
+        finally:
+            stream.close()
+        return self.state()
+
+    def run_turn(
+        self, text: str, trace_id: str | None = None, on_stage: StageCallback | None = None
+    ) -> TurnOutcome:
         """Run one turn; raises on failures the CLI turns into user messages.
 
         A confirmation left unanswered (D12: it lives until the next user input) is
@@ -216,8 +285,52 @@ class AgentSession:
             "blocked": False,
             "guard": None,
         }
-        values = self.graph.invoke(turn_input, self.config(trace_id))
+        if on_stage is not None:
+            on_stage(STAGE_START)
+        values = self._stream(turn_input, trace_id, on_stage)
         return self._outcome(values, trace_id)
+
+    # -- conversations ----------------------------------------------------------------
+
+    def conversations(self, limit: int = 20) -> list[Conversation]:
+        if self.storage is None:
+            return []
+        return self.storage.list_conversations(self.user.user_id, limit=limit)
+
+    def find_conversation(self, id_or_prefix: str) -> Conversation | None:
+        """The user's conversation by full id or a unique prefix (as shown by `/history`).
+
+        Raises `ConversationAccessError` for the full id of another user's conversation.
+        """
+        wanted = id_or_prefix.strip().lower()
+        if self.storage is None or not wanted:
+            return None
+        other = self.storage.get_conversation(wanted)
+        if other is not None and other.owner_user_id != self.user.user_id:
+            log_event("conversation_access_denied", level="warning", target=wanted)
+            raise ConversationAccessError(wanted)
+        matches = [
+            c
+            for c in self.storage.list_conversations(self.user.user_id, limit=10_000)
+            if c.id.startswith(wanted)
+        ]
+        exact = [c for c in matches if c.id == wanted]
+        if exact:
+            return exact[0]
+        return matches[0] if len(matches) == 1 else None
+
+    def last_conversation(self) -> Conversation | None:
+        recent = self.conversations(limit=1)
+        return recent[0] if recent else None
+
+    def recent_exchanges(self, n: int = 3) -> list[tuple[str, str]]:
+        """(user, assistant) pairs of the last `n` turns of the current conversation."""
+        return memory.recent_exchanges(self.state().get("messages") or [], n)
+
+    def reports(self, limit: int = 20) -> list[Report]:
+        if self.storage is None:
+            return []
+        return self.storage.list_reports(self.user.user_id, limit=limit)
 
     @property
     def preferences(self) -> Preferences | None:
@@ -322,7 +435,12 @@ class AgentSession:
             candidate_id=candidate.id,
         )
 
-    def resume(self, answers: Mapping[str, str], trace_id: str | None = None) -> TurnOutcome:
+    def resume(
+        self,
+        answers: Mapping[str, str],
+        trace_id: str | None = None,
+        on_stage: StageCallback | None = None,
+    ) -> TurnOutcome:
         """Answer the pending confirmations (interrupt id -> user's text) and continue.
 
         Unanswered ones count as "no". Each answer carries the digest of the preview the
@@ -336,7 +454,7 @@ class AgentSession:
         }
         if not replies:
             raise RuntimeError("there is no pending confirmation to answer")
-        values = self.graph.invoke(Command(resume=replies), self.config(trace_id))
+        values = self._stream(Command(resume=replies), trace_id, on_stage)
         return self._outcome(values, trace_id)
 
 
@@ -369,10 +487,13 @@ def load_golden_index(settings: Settings) -> GoldenIndex:
 
 
 def create_session(
-    user: UserContext, settings: Settings, conversation_id: str | None = None
+    user: UserContext,
+    settings: Settings,
+    conversation_id: str | None = None,
+    runner: BigQueryRunner | None = None,
 ) -> AgentSession:
     """Production wiring: BigQuery, schema, tools, Gemini models, SQLite storage/checkpoints."""
-    runner = BigQueryRunner.from_settings(settings)
+    runner = runner or BigQueryRunner.from_settings(settings)
     schema = SchemaCatalog.load(runner)
     storage = Storage(settings.app_db_path)
     tool_ctx = ToolContext(

@@ -176,7 +176,12 @@ def _run_sql(ctx: ToolContext) -> BaseTool:
         except SqlRejected as exc:
             return _failure(ctx, "ERROR(rejected)", str(exc))
 
-        log_event("run_sql", purpose=purpose, tables=sorted(guarded.tables))
+        log_event(
+            "run_sql",
+            purpose=purpose,
+            tables=sorted(guarded.tables),
+            acl=not ctx.user.has_full_access,
+        )
         try:
             df = _run_within_budget(ctx, guarded.sql)
         except SqlInvalid as exc:

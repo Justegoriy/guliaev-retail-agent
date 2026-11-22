@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.tracers.langchain import LangChainTracer
 
-from retail_agent.observability import logger, tracing
+from retail_agent.observability import inspect, logger, tracing
 from retail_agent.observability.callbacks import ObservabilityCallbackHandler
 from retail_agent.settings import Settings
 
@@ -71,6 +71,32 @@ def test_enabled_tracing_adds_tracer_with_anonymizer():
     tracer = config["callbacks"][1]
     assert isinstance(tracer, LangChainTracer)
     assert tracer.project_name == "proj"
+
+
+def test_root_run_id_is_logged_and_linkable(tmp_path):
+    client = MagicMock()
+    client.list_projects.return_value = iter([])
+    client.read_project.return_value.id = "proj-uuid"
+    client.runs.get_url.return_value.url = "https://smith.langchain.com/r/1"
+    tracing.setup_langsmith(make_settings(), client_factory=lambda **kw: client)
+
+    config = config_for(make_settings())
+    run_id = str(config["run_id"])
+    [event] = [
+        e for e in inspect.read_jsonl(tmp_path / "agent.jsonl") if e["event"] == "langsmith_run"
+    ]
+    assert event["run_id"] == run_id
+
+    assert tracing.run_url(run_id) == "https://smith.langchain.com/r/1"
+    client.runs.get_url.assert_called_once_with(run_id, project_id="proj-uuid", trace_id=run_id)
+    client.read_project.side_effect = RuntimeError("offline")
+    assert tracing.run_url(run_id) is None
+
+
+def test_run_url_without_tracing_is_none():
+    tracing.setup_langsmith(Settings(_env_file=None))
+    assert "run_id" not in config_for(Settings(_env_file=None))
+    assert tracing.run_url("x") is None
 
 
 def test_anonymizer_masks_nested_strings():

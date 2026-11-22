@@ -8,6 +8,7 @@ string sent to LangSmith goes through `pii.mask_text` via the client's anonymize
 
 import logging
 import os
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -83,9 +84,7 @@ def turn_config(
     """Config for one graph run: local log callbacks, LangSmith tracer, run metadata."""
     payload_path = settings.llm_payload_log_path if settings.log_llm_payloads else None
     callbacks: list[BaseCallbackHandler] = [ObservabilityCallbackHandler(payload_path)]
-    if _client is not None:
-        callbacks.append(LangChainTracer(project_name=_project, client=_client))
-    return {
+    config: RunnableConfig = {
         "run_name": "turn",
         "metadata": {
             "trace_id": trace_id,
@@ -95,3 +94,22 @@ def turn_config(
         "tags": [user_role],
         "callbacks": callbacks,
     }
+    if _client is not None:
+        callbacks.append(LangChainTracer(project_name=_project, client=_client))
+        run_id = uuid.uuid4()
+        config["run_id"] = run_id
+        log_event("langsmith_run", run_id=str(run_id), project=_project)
+    return config
+
+
+def run_url(run_id: str) -> str | None:
+    """Link to a root run in the LangSmith UI, or None (tracing off, LangSmith unreachable)."""
+    if _client is None or _project is None:
+        return None
+    try:
+        project = _client.read_project(project_name=_project)
+        response = _client.runs.get_url(run_id, project_id=str(project.id), trace_id=run_id)
+    except Exception as exc:
+        log_event("langsmith_url_failed", level="warning", error=type(exc).__name__)
+        return None
+    return getattr(response, "url", None) or None

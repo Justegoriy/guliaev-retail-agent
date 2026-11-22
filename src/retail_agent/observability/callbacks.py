@@ -7,6 +7,7 @@ Tool arguments and results are PII-masked before they are clipped, so a cut cann
 leave half of an e-mail address unmasked.
 """
 
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -25,6 +26,34 @@ from retail_agent.safety import pii
 
 MAX_FIELD_CHARS = 2048
 MAX_ERROR_CHARS = 500
+
+
+@dataclass
+class Usage:
+    llm_calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+# Per-trace totals for `turn_end`; a turn may span several graph runs (confirmation resume).
+_usage: dict[str, Usage] = {}
+_usage_lock = threading.Lock()
+
+
+def _add_usage(trace_id: str | None, input_tokens: int | None, output_tokens: int | None) -> None:
+    if not trace_id:
+        return
+    with _usage_lock:
+        usage = _usage.setdefault(trace_id, Usage())
+        usage.llm_calls += 1
+        usage.input_tokens += input_tokens or 0
+        usage.output_tokens += output_tokens or 0
+
+
+def pop_usage(trace_id: str) -> Usage:
+    """LLM calls and tokens of the trace so far; forgets them."""
+    with _usage_lock:
+        return _usage.pop(trace_id, None) or Usage()
 
 
 def clip(text: str, limit: int = MAX_FIELD_CHARS) -> str:
@@ -91,6 +120,7 @@ class ObservabilityCallbackHandler(BaseCallbackHandler):
         usage = getattr(message, "usage_metadata", None) or {}
         tool_calls = getattr(message, "tool_calls", None) or []
         finish_reason = (getattr(message, "response_metadata", None) or {}).get("finish_reason")
+        _add_usage(logger.trace_id_var.get(), usage.get("input_tokens"), usage.get("output_tokens"))
         log_event(
             "llm_call",
             call_id=_call_id(run_id),
