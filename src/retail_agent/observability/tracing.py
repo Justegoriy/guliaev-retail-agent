@@ -6,10 +6,13 @@ uploaded in the background and upload failures are not reported to the user. Eve
 string sent to LangSmith goes through `pii.mask_text` via the client's anonymizer.
 """
 
+import asyncio
+import inspect
 import logging
 import os
 import uuid
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,6 +30,7 @@ from retail_agent.settings import Settings
 # Variables that make LangChain attach its own tracer, which would bypass the anonymizer.
 _ENV_TRACING_FLAGS = ("LANGSMITH_TRACING", "LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2")
 LANGSMITH_TIMEOUT_MS = 5000
+URL_TIMEOUT_S = 10
 
 
 @dataclass(frozen=True)
@@ -109,6 +113,10 @@ def run_url(run_id: str) -> str | None:
     try:
         project = _client.read_project(project_name=_project)
         response = _client.runs.get_url(run_id, project_id=str(project.id), trace_id=run_id)
+        if inspect.isawaitable(response):
+            # `client.runs` is async-only; a worker thread has no running event loop.
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                response = pool.submit(asyncio.run, response).result(timeout=URL_TIMEOUT_S)
     except Exception as exc:
         log_event("langsmith_url_failed", level="warning", error=type(exc).__name__)
         return None

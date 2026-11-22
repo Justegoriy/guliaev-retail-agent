@@ -59,6 +59,11 @@ flowchart LR
 ├── src/retail_agent/
 │   ├── __main__.py                # python -m retail_agent
 │   ├── cli.py
+│   ├── turns.py                   # общий запуск хода для CLI и веба (логи, ошибки, метрики)
+│   ├── health.py                  # проверки Gemini / BigQuery при старте
+│   ├── web/
+│   │   ├── __main__.py            # python -m retail_agent.web
+│   │   └── app.py                 # Streamlit: чат, выбор роли, предпочтения, отчёты
 │   ├── settings.py                # pydantic-settings
 │   ├── auth.py                    # UserContext из users.yaml
 │   ├── llm.py                     # модель + retry + fallback + rate limiter
@@ -593,6 +598,33 @@ preference_signals(id INTEGER PK, user_id, key, value JSON, weight REAL,
 
 ---
 
+## Шаг 10.5. Веб-интерфейс для демонстрации
+
+Дополнение сверх ТЗ: простой веб-клиент для демо и ручного тестирования. Это второй интерфейс к тому же ядру (TZ §5: интерфейс отделён от агента), логика агента не дублируется.
+
+**Файлы:** `src/retail_agent/turns.py`, `src/retail_agent/web/app.py`, `src/retail_agent/web/__main__.py`, `tests/test_turns.py`, `tests/test_web.py`.
+
+- [ ] **Стек — Streamlit:** чистый Python, готовые чат-виджеты (`st.chat_message`, `st.chat_input`), `st.status` для стадий хода, sidebar и вкладки — без отдельного фронтенда и API. Альтернативы: Gradio (чат удобен, но слабее для вкладок с таблицами и состояния), FastAPI + HTML (больше кода ради демо). Зависимость `streamlit` — в `requirements.txt`. Запуск: `python -m retail_agent.web` (обёртка над `streamlit run`, слушает только `localhost`).
+- [ ] **Общий слой хода (`turns.py`)** — вынести из `cli.py` то, что должно быть одинаковым в обоих интерфейсах: новый `trace_id`, `turn_start`, вызов `run_turn`/`resume` с `on_stage`, перехват исключений → `errors.user_message`, `turn_end` (ok / blocked / error / cancelled, latency, LLM calls, токены, SQL, bytes), `STEP_LIMIT_MESSAGE`. CLI переходит на этот слой, его тесты остаются зелёными. Иначе метрики `/stats` и `turn_end` у веба и CLI разъедутся.
+- [ ] **Общие ресурсы и сессии пользователей.** `create_session` разделить на тяжёлую общую часть (BigQuery runner, схема, golden index, модели, storage, checkpointer — один раз на процесс через `st.cache_resource`) и лёгкую часть пользователя (`ToolContext`, tools с его ACL, `AgentSession`), чтобы смена роли была мгновенной. `AgentSession` пользователя хранится в `st.session_state`. Streamlit выполняет каждый rerun в своём потоке, поэтому contextvars логгера (`user_id`, `conversation_id`) выставляются в начале каждого rerun.
+- [ ] **Sidebar:**
+  - выбор демо-пользователя из `config/users.yaml` (имя, роль, доступ к категориям), с явной пометкой «демо без аутентификации» (D4). Смена пользователя = новая сессия: чат, разговоры, отчёты и предпочтения — только его;
+  - статус подключений (`health.check_gemini` / `check_bigquery` при старте), модель, статус LangSmith;
+  - разговоры пользователя (как `/history`): кнопка «Новый разговор», выбор разговора = `/resume` (проверка владельца в `AgentSession`).
+- [ ] **Вкладка «Чат»:**
+  - история текущего разговора из checkpoint (только реплики пользователя и ответы агента), ввод через `st.chat_input`;
+  - во время хода — `st.status` со стадиями из `on_stage` («Checking request…», «Querying BigQuery…», «Writing answer…»); ответ — markdown, под ним серым `trace: <id>` и ссылка на LangSmith run, если трейсинг включён;
+  - кнопки 👍 / 👎 (+ необязательный комментарий) → `mark_good` / `mark_bad`, как `/good` / `/bad`;
+  - **подтверждение** (interrupt): таблица затронутых отчётов (id, заголовок, дата, превью) и кнопки «Удалить» / «Отмена» → `session.resume({interrupt_id: "yes" | "no"})`. Новое сообщение при открытом подтверждении отменяет его (D12), как в CLI. LLM в подтверждении не участвует.
+- [ ] **Вкладка «Предпочтения»:** таблица профиля (ключ, значение, источник explicit/inferred, уверенность, дата обновления), кнопки «Забыть» по ключу и «Сбросить всё», форма «задать» (ключ из whitelist, значение) — через те же методы `AgentSession`, что и `/prefs`, с той же валидацией (отказ показывается как предупреждение).
+- [ ] **Вкладка «Отчёты»:** список своих отчётов (заголовок, дата, отметка «этот разговор»), раскрытие — содержимое в markdown, кнопка скачивания `.md`. Удаления из веба напрямую нет: только через чат с подтверждением (Req 3 — единый строгий механизм, без обходного пути).
+- [ ] **Тесты:** `test_turns.py` — общий слой хода (ok, ошибка → user message и `turn_end(error)`, отмена, usage в `turn_end`); `test_web.py` — `streamlit.testing.v1.AppTest` с fake-сессией: выбор пользователя, отправка сообщения → ответ и trace id, подтверждение кнопками → `resume` с нужным ответом, вкладки предпочтений и отчётов отображают данные сессии, смена пользователя не показывает чужие разговоры.
+- [ ] **Документация:** раздел в README (запуск, скриншот), в `technical_design` — веб как второй клиент того же ядра; ограничения: только localhost, без аутентификации, один процесс.
+
+**Готово, когда:** в браузере проходят: вопрос `ceo` со стадиями и trace id; вопрос `bottoms_manager` по чужой категории (A8 — ACL работает так же); сохранение отчёта и его появление во вкладке «Отчёты»; удаление через чат с кнопками «Удалить» / «Отмена» (A11, A12); «всегда отвечай таблицами» → предпочтение видно во вкладке (A27); смена пользователя не показывает чужие разговоры и отчёты; CLI и его тесты работают как раньше.
+
+---
+
 ## Шаг 11. Тесты, eval, ручная приёмка
 
 - [ ] Довести `pytest` (без сети) до зелёного; маркер `bq`/`llm` для интеграционных (по умолчанию пропускаются).
@@ -660,6 +692,7 @@ preference_signals(id INTEGER PK, user_id, key, value JSON, weight REAL,
 | 8 ⚪ | Golden (retrieval + обновление через кандидатов), persona | Hybrid Intelligence, Persona |
 | 9 | Адаптация под пользователя | Learning Loop (user level) |
 | 10 | CLI, `/history`, `/resume`, `/prefs`, `/trace`, `/stats` | CLI, Observability, история чата, предпочтения |
+| 10.5 | Веб-интерфейс (Streamlit): чат, роль, предпочтения, отчёты | Демо; интерфейс отделён от ядра (§5) |
 | 11 | Тесты, eval (judge + execution accuracy), failure report, CI | QA, Learning Loop (system level) |
 | 12 | Документация, HLD | Все deliverables |
 | 13 | Финализация | Сдача |

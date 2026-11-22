@@ -1,4 +1,5 @@
 import os
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -77,7 +78,11 @@ def test_root_run_id_is_logged_and_linkable(tmp_path):
     client = MagicMock()
     client.list_projects.return_value = iter([])
     client.read_project.return_value.id = "proj-uuid"
-    client.runs.get_url.return_value.url = "https://smith.langchain.com/r/1"
+
+    async def get_url(run_id, **kwargs):  # the real `client.runs` is async-only
+        return SimpleNamespace(url="https://smith.langchain.com/r/1")
+
+    client.runs.get_url = MagicMock(side_effect=get_url)
     tracing.setup_langsmith(make_settings(), client_factory=lambda **kw: client)
 
     config = config_for(make_settings())
