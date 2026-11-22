@@ -18,6 +18,7 @@ from retail_agent.data.storage import Storage
 from retail_agent.graph.builder import AgentSession, open_checkpointer
 from retail_agent.graph.memory import ContextExtraction, HistorySummary
 from retail_agent.graph.nodes import AgentDeps
+from retail_agent.knowledge.golden import CandidateStore
 from retail_agent.knowledge.schema import SchemaCatalog
 from retail_agent.prompts.context import PromptSources, ReloadingFile, glossary_text, persona_text
 from retail_agent.safety.input_guard import GuardVerdict
@@ -130,8 +131,12 @@ def revenue_df(months: int = 3) -> pd.DataFrame:
 
 
 class Harness:
-    def __init__(self, tmp_path, user=CEO, aux=True, conversation_id="conv1", **settings):
+    def __init__(
+        self, tmp_path, user=CEO, aux=True, conversation_id="conv1", golden=None, **settings
+    ):
         self.tmp_path = tmp_path
+        self.golden = golden
+        self.candidates = CandidateStore(tmp_path / "golden_candidates.jsonl")
         self.settings = make_settings(tmp_path, **settings)
         self.runner = MagicMock()
         self.runner.dataset_id = DATASET
@@ -173,6 +178,8 @@ class Harness:
             aux=self.aux,
             prompt_sources=self.sources,
             today=lambda: date(2026, 11, 20),
+            golden=self.golden,
+            candidates=self.candidates,
         )
         checkpointer = open_checkpointer(self.settings.checkpoint_db_path)
         return AgentSession(deps, checkpointer, self.conversation_id)

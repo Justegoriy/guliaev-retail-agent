@@ -20,7 +20,7 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -33,6 +33,7 @@ from pydantic import BaseModel
 from retail_agent.auth import UserContext
 from retail_agent.data.bigquery import BigQueryRunner
 from retail_agent.data.storage import Storage
+from retail_agent.graph import memory
 from retail_agent.graph.nodes import (
     AgentDeps,
     AgentNodes,
@@ -42,6 +43,7 @@ from retail_agent.graph.nodes import (
     tool_error_message,
 )
 from retail_agent.graph.state import AgentState
+from retail_agent.knowledge.golden import CandidateStore, GeminiEmbedder, GoldenIndex
 from retail_agent.knowledge.schema import SchemaCatalog
 from retail_agent.llm import build_chat_model
 from retail_agent.observability import logger, tracing
@@ -100,6 +102,12 @@ class TurnOutcome:
     blocked: bool
     trace_id: str
     pending: tuple[PendingConfirmation, ...] = ()  # non-empty: answer them via `resume`
+
+
+@dataclass(frozen=True)
+class FeedbackResult:
+    message: str  # for the user
+    candidate_id: str | None = None  # set when the answer became a Golden Bucket candidate
 
 
 class AgentSession:
@@ -203,6 +211,47 @@ class AgentSession:
         values = self.graph.invoke(turn_input, self.config(trace_id))
         return self._outcome(values, trace_id)
 
+    def mark_good(self) -> FeedbackResult:
+        """`/good` on the last answer: if it is backed by successful SQL, it becomes a
+        Golden Bucket candidate for analysts to review (question, SQL, answer summary)."""
+        state = self.state()
+        trace_id = state.get("trace_id")
+        if trace_id:
+            logger.trace_id_var.set(trace_id)  # the feedback belongs to the answer's trace
+        log_event("feedback", rating="good")
+        thanks = "Thanks for the feedback!"
+        messages = state.get("messages") or []
+        turn = memory.current_turn(messages)
+        answer = memory.final_answer(turn)
+        succeeded = any(
+            isinstance(m, ToolMessage) and m.name == "run_sql" and m.text.startswith("OK")
+            for m in turn
+        )
+        context = state.get("analysis_context")
+        store = self.deps.candidates
+        if store is None or not trace_id or not answer or self.pending():
+            return FeedbackResult(thanks)
+        if not succeeded or not context or not context.get("sql"):
+            return FeedbackResult(
+                f"{thanks} The last answer did not run a data query, so there is nothing "
+                "to add to the analysts' knowledge base."
+            )
+        candidate = store.add(
+            question=context.get("question") or memory.last_user_text(messages),
+            sql=context["sql"],
+            answer_summary=answer,
+            user_role=self.user.role,
+            trace_id=trace_id,
+            tags=context.get("entities") or [],
+        )
+        if candidate is None:
+            return FeedbackResult(f"{thanks} This answer is already waiting for review.")
+        return FeedbackResult(
+            f"{thanks} The question and its SQL were sent to analysts for review as a "
+            f"candidate example ({candidate.id}).",
+            candidate_id=candidate.id,
+        )
+
     def resume(self, answers: Mapping[str, str], trace_id: str | None = None) -> TurnOutcome:
         """Answer the pending confirmations (interrupt id -> user's text) and continue.
 
@@ -229,6 +278,26 @@ def _aux_factory(settings: Settings):
     return factory
 
 
+def load_golden_index(settings: Settings) -> GoldenIndex:
+    """Trios with cached embeddings; without an API key, keyword retrieval only."""
+    embeddings = None
+    if settings.google_api_key is not None:
+        embeddings = GeminiEmbedder(
+            settings.google_api_key.get_secret_value(),
+            settings.gemini_embedding_model,
+            timeout_s=settings.embedding_timeout_s,
+        )
+    return GoldenIndex.from_file(
+        settings.golden_trios_path,
+        embeddings=embeddings,
+        index_path=settings.golden_index_path,
+        model_name=settings.gemini_embedding_model,
+        top_k=settings.golden_top_k,
+        min_score=settings.golden_min_score,
+        keyword_min_score=settings.golden_keyword_min_score,
+    )
+
+
 def create_session(
     user: UserContext, settings: Settings, conversation_id: str | None = None
 ) -> AgentSession:
@@ -250,6 +319,8 @@ def create_session(
         agent_model=build_chat_model("main", tools, settings=settings),
         settings=settings,
         aux=_aux_factory(settings),
+        golden=load_golden_index(settings),
+        candidates=CandidateStore(settings.golden_candidates_path),
     )
-    log_event("agent_ready", tools=[t.name for t in tools])
+    log_event("agent_ready", tools=[t.name for t in tools], golden_mode=deps.golden.mode)
     return AgentSession(deps, open_checkpointer(settings.checkpoint_db_path), conversation_id)

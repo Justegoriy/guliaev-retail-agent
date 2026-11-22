@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     history_keep_turns: int = Field(6, ge=1)
     history_summarize_after_turns: int = Field(10, ge=1)
 
+    # Golden Bucket
+    golden_top_k: int = Field(3, ge=0)
+    golden_min_score: float = Field(0.65, ge=0, le=1)  # cosine similarity of embeddings
+    golden_keyword_min_score: float = Field(0.3, ge=0, le=1)  # share of query keywords
+    embedding_timeout_s: float = Field(10, gt=0)
+    golden_trios_path: Path = Path("data/golden_trios.json")
+    golden_index_path: Path = Path("data/golden_index.npz")
+    golden_candidates_path: Path = Path("data/golden_candidates.jsonl")
+
     # Storage & logs (relative paths are resolved against the project root)
     app_db_path: Path = Path("data/app.db")
     checkpoint_db_path: Path = Path("data/checkpoints.db")
@@ -64,7 +73,15 @@ class Settings(BaseSettings):
     def _empty_to_none(cls, value):
         return value or None
 
-    @field_validator("app_db_path", "checkpoint_db_path", "exports_dir", "log_path")
+    @field_validator(
+        "app_db_path",
+        "checkpoint_db_path",
+        "exports_dir",
+        "log_path",
+        "golden_trios_path",
+        "golden_index_path",
+        "golden_candidates_path",
+    )
     @classmethod
     def _resolve_path(cls, value: Path) -> Path:
         return value if value.is_absolute() else PROJECT_ROOT / value

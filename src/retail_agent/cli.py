@@ -154,6 +154,17 @@ def _run_turn(session: AgentSession, text: str, read: Callable[[str], str]) -> N
         _run_turn(session, next_message, read)
 
 
+def _good(session: AgentSession) -> None:
+    try:
+        result = session.mark_good()
+    except Exception as exc:
+        kind = errors.classify(exc)
+        log_event("feedback_failed", level="error", error=type(exc).__name__, detail=str(exc)[:300])
+        console.print(f"[red]{errors.user_message(kind)}[/red]")
+        return
+    console.print(f"[green]{result.message}[/green]")
+
+
 def _repl(session: AgentSession) -> None:
     user = session.user
     read = _make_reader()
@@ -171,6 +182,9 @@ def _repl(session: AgentSession) -> None:
             continue
         if text.lower() in EXIT_COMMANDS:
             break
+        if text.lower() == "/good":
+            _good(session)
+            continue
         _run_turn(session, text, read)
 
 

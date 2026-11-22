@@ -1,0 +1,293 @@
+[
+  {
+    "id": "revenue_monthly",
+    "question": "What was our monthly revenue in 2025?",
+    "sql": "SELECT\n  FORMAT_DATE('%Y-%m', DATE(oi.created_at)) AS month,\n  ROUND(SUM(oi.sale_price), 2) AS revenue,\n  COUNT(DISTINCT oi.order_id) AS orders,\n  ROUND(SAFE_DIVIDE(SUM(oi.sale_price), COUNT(DISTINCT oi.order_id)), 2) AS aov\nFROM `bigquery-public-data.thelook_ecommerce.order_items` oi\nWHERE oi.status NOT IN ('Cancelled', 'Returned')\n  AND DATE(oi.created_at) BETWEEN DATE '2025-01-01' AND DATE '2025-12-31'\nGROUP BY month\nORDER BY month",
+    "report": "Revenue counts only sold items (status not Cancelled or Returned), summed from order_items.sale_price by order month (UTC). Show a month-by-month table with orders and AOV next to revenue, so the reader sees whether growth came from volume or basket size. Lead with the total for the year and the strongest and weakest months; flag the current month as incomplete if it is included.",
+    "tags": [
+      "revenue",
+      "monthly",
+      "trend",
+      "sales",
+      "orders",
+      "aov"
+    ],
+    "tables": [
+      "order_items"
+    ],
+    "status": "approved"
+  },
+  {
+    "id": "top_customers",
+    "question": "Who are our top 10 customers by revenue in the last 12 months?",
+    "sql": "SELECT\n  oi.user_id AS customer_id,\n  u.country,\n  u.traffic_source,\n  COUNT(DISTINCT oi.order_id) AS orders,\n  ROUND(SUM(oi.sale_price), 2) AS revenue,\n  MIN(DATE(oi.created_at)) AS first_order_in_period,\n  MAX(DATE(oi.created_at)) AS last_order_in_period\nFROM `bigquery-public-data.thelook_ecommerce.order_items` oi\nJOIN `bigquery-public-data.thelook_ecommerce.users` u ON u.id = oi.user_id\nWHERE oi.status NOT IN ('Cancelled', 'Returned')\n  AND DATE(oi.created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)\nGROUP BY customer_id, u.country, u.traffic_source\nORDER BY revenue DESC\nLIMIT 10",
+    "report": "Customers are identified only by users.id, never by name or e-mail. Rank by revenue of sold items over a rolling 12 months and add orders, country, acquisition channel and first/last order date, which explain the ranking. Note how concentrated revenue is (share of the top 10 in total revenue needs a second query) and whether the top customers are recent or long-standing.",
+    "tags": [
+      "customers",
+      "top customers",
+      "vip",
+      "revenue",
+      "ranking",
+      "loyalty"
+    ],
+    "tables": [
+      "order_items",
+      "users"
+    ],
+    "status": "approved"
+  },
+  {
+    "id": "states_underspending",
+    "question": "Which US states are underspending relative to their customer base?",
+    "sql": "WITH state_stats AS (\n  SELECT\n    u.state,\n    COUNT(DISTINCT u.id) AS customers,\n    SUM(IF(oi.status NOT IN ('Cancelled', 'Returned'), oi.sale_price, 0)) AS revenue\n  FROM `bigquery-public-data.thelook_ecommerce.users` u\n  LEFT JOIN `bigquery-public-data.thelook_ecommerce.order_items` oi\n    ON oi.user_id = u.id\n    AND DATE(oi.created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)\n  WHERE u.country = 'United States'\n  GROUP BY u.state\n)\nSELECT\n  state,\n  customers,\n  ROUND(revenue, 2) AS revenue,\n  ROUND(SAFE_DIVIDE(revenue, customers), 2) AS revenue_per_customer,\n  ROUND(SAFE_DIVIDE(SAFE_DIVIDE(revenue, customers), SAFE_DIVIDE(SUM(revenue) OVER (), SUM(customers) OVER ())), 3) AS index_vs_us_average\nFROM state_stats\nWHERE customers >= 100\nORDER BY index_vs_us_average",
+    "report": "'Underspending' means revenue per registered customer below the US average over the last 12 months (index < 1.0), not low total revenue: large states naturally have more revenue. States with fewer than 100 customers are excluded as too noisy. Present the bottom states with their index and customer counts, then suggest checking AOV and purchase frequency in those states as the next step.",
+    "tags": [
+      "states",
+      "geography",
+      "underspending",
+      "revenue per customer",
+      "regions",
+      "usa"
+    ],
+    "tables": [
+      "users",
+      "order_items"
+    ],
+    "status": "approved"
+  },
+  {
+    "id": "churn_monthly",
+    "question": "What is our monthly customer churn rate in 2025?",
+    "sql": "WITH active AS (\n  SELECT DISTINCT user_id, DATE_TRUNC(DATE(created_at), MONTH) AS month\n  FROM `bigquery-public-data.thelook_ecommerce.order_items`\n  WHERE status NOT IN ('Cancelled', 'Returned')\n),\ntransitions AS (\n  SELECT a.month AS prev_month, a.user_id, b.user_id IS NOT NULL AS retained\n  FROM active a\n  LEFT JOIN active b\n    ON b.user_id = a.user_id AND b.month = DATE_ADD(a.month, INTERVAL 1 MONTH)\n)\nSELECT\n  FORMAT_DATE('%Y-%m', DATE_ADD(prev_month, INTERVAL 1 MONTH)) AS month,\n  COUNT(*) AS active_previous_month,\n  COUNTIF(NOT retained) AS churned,\n  ROUND(SAFE_DIVIDE(COUNTIF(NOT retained), COUNT(*)), 4) AS churn_rate\nFROM transitions\nWHERE prev_month BETWEEN DATE '2024-12-01' AND DATE '2025-11-01'\nGROUP BY month\nORDER BY month",
+    "report": "Churn follows the glossary: a customer active (with a sold item) in month M-1 and without sold items in month M; churn rate = churned / active in M-1. State this definition in the answer. In a marketplace with infrequent purchases monthly churn is naturally very high, so compare months with each other rather than judging the absolute level, and never include the current incomplete month.",
+    "tags": [
+      "churn",
+      "churn rate",
+      "retention",
+      "monthly",
+      "lost customers",
+      "customers who stopped buying",
+      "attrition"
+    ],
+    "tables": [
+      "order_items"
+    ],
+    "status": "approved"
+  },
+  {
+    "id": "churn_drivers",
+    "question": "Why did churn increase last month?",
+    "sql": [
+      "WITH active AS (\n  SELECT DISTINCT oi.user_id, DATE_TRUNC(DATE(oi.created_at), MONTH) AS month\n  FROM `bigquery-public-data.thelook_ecommerce.order_items` oi\n  WHERE oi.status NOT IN ('Cancelled', 'Returned')\n),\ntransitions AS (\n  SELECT a.month AS prev_month, a.user_id, b.user_id IS NOT NULL AS retained\n  FROM active a\n  LEFT JOIN active b ON b.user_id = a.user_id AND b.month = DATE_ADD(a.month, INTERVAL 1 MONTH)\n)\nSELECT\n  FORMAT_DATE('%Y-%m', DATE_ADD(t.prev_month, INTERVAL 1 MONTH)) AS month,\n  u.traffic_source,\n  COUNT(*) AS active_previous_month,\n  ROUND(SAFE_DIVIDE(COUNTIF(NOT t.retained), COUNT(*)), 4) AS churn_rate\nFROM transitions t\nJOIN `bigquery-public-data.thelook_ecommerce.users` u ON u.id = t.user_id\nWHERE t.prev_month BETWEEN DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 3 MONTH)\n  AND DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 2 MONTH)\nGROUP BY month, u.traffic_source\nORDER BY u.traffic_source, month",
+      "WITH active AS (\n  SELECT DISTINCT oi.user_id, DATE_TRUNC(DATE(oi.created_at), MONTH) AS month\n  FROM `bigquery-public-data.thelook_ecommerce.order_items` oi\n  WHERE oi.status NOT IN ('Cancelled', 'Returned')\n),\nfirst_month AS (\n  SELECT user_id, MIN(month) AS first_month FROM active GROUP BY user_id\n),\ntransitions AS (\n  SELECT a.month AS prev_month, a.user_id, b.user_id IS NOT NULL AS retained\n  FROM active a\n  LEFT JOIN active b ON b.user_id = a.user_id AND b.month = DATE_ADD(a.month, INTERVAL 1 MONTH)\n)\nSELECT\n  FORMAT_DATE('%Y-%m', DATE_ADD(t.prev_month, INTERVAL 1 MONTH)) AS month,\n  IF(f.first_month = t.prev_month, 'new', 'existing') AS customer_type,\n  COUNT(*) AS active_previous_month,\n  ROUND(SAFE_DIVIDE(COUNTIF(NOT t.retained), COUNT(*)), 4) AS churn_rate\nFROM transitions t\nJOIN first_month f USING (user_id)\nWHERE t.prev_month BETWEEN DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 3 MONTH)\n  AND DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 2 MONTH)\nGROUP BY month, customer_type\nORDER BY customer_type, month"
+    ],
+    "report": "'Last month' is the last complete calendar month, compared with the month before it; churn as in the glossary. The analysis is a decomposition: first confirm the change in the overall rate, then test hypotheses one query each - mix of acquisition channels (traffic_source), new versus existing customers, and the categories of their last purchase. Conclude which segment explains most of the change (mix shift versus a rate change inside a segment) and give action items, e.g. win-back campaigns for the segment with the largest increase.",
+    "tags": [
+      "churn",
+      "why",
+      "drivers",
+      "root cause",
+      "traffic source",
+      "new customers",
+      "decomposition"
+    ],
+    "tables": [
+      "order_items",
+      "users"
+    ],
+    "status": "approved"
+  },
+  {
+    "id": "brand_comparison",
+    "question": "Compare the top brands in Jeans in 2025: revenue, units, price and returns.",
+    "sql": "SELECT\n  p.brand,\n  COUNTIF(oi.status NOT IN ('Cancelled', 'Returned')) AS units_sold,\n  ROUND(SUM(IF(oi.status NOT IN ('Cancelled', 'Returned'), oi.sale_price, 0)), 2) AS revenue,\n  ROUND(AVG(IF(oi.status NOT IN ('Cancelled', 'Returned'), oi.sale_price, NULL)), 2) AS avg_price,\n  ROUND(SUM(IF(oi.status NOT IN ('Cancelled', 'Returned'), oi.sale_price - p.cost, 0)), 2) AS margin,\n  ROUND(SAFE_DIVIDE(COUNTIF(oi.status = 'Returned'), COUNTIF(oi.status != 'Cancelled')), 4) AS return_rate\nFROM `bigquery-public-data.thelook_ecommerce.order_items` oi\nJOIN `bigquery-public-data.thelook_ecommerce.products` p ON p.id = oi.product_id\nWHERE p.category = 'Jeans'\n  AND DATE(oi.created_at) BETWEEN DATE '2025-01-01' AND DATE '2025-12-31'\nGROUP BY p.brand\nHAVING units_sold >= 50\nORDER BY revenue DESC\nLIMIT 15",
+    "report": "Brand comparisons put volume, price and quality side by side: units and revenue of sold items, average selling price, gross margin (sale_price - cost) and return rate. Brands with very few units are excluded so rates are meaningful. Point out brands with high revenue but a high return rate or a thin margin - they look better than they are - and premium brands with small volume but strong margin.",
+    "tags": [
+      "brands",
+      "brand comparison",
+      "products",
+      "jeans",
+      "margin",
+      "return rate",
+      "price"
+    ],
+    "tables": [
+      "order_items",
+      "products"
+    ],
+    "status": "approved"
+  },
+  {
+    "id": "return_rate_category",
+    "question": "Which product categories have the highest return rate?",
+    "sql": "SELECT\n  p.category,\n  COUNTIF(oi.status != 'Cancelled') AS items_not_cancelled,\n  COUNTIF(oi.status = 'Returned') AS items_returned,\n  ROUND(SAFE_DIVIDE(COUNTIF(oi.status = 'Returned'), COUNTIF(oi.status != 'Cancelled')), 4) AS return_rate,\n  ROUND(SUM(IF(oi.status = 'Returned', oi.sale_price, 0)), 2) AS returned_value\nFROM `bigquery-public-data.thelook_ecommerce.order_items` oi\nJOIN `bigquery-public-data.thelook_ecommerce.products` p ON p.id = oi.product_id\nWHERE DATE(oi.created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)\nGROUP BY p.category\nORDER BY return_rate DESC",
+    "report": "Return rate = Returned items / items not Cancelled (cancelled items never shipped, so they cannot be returned). Show the rate together with the returned value in USD: a category with a moderate rate but high prices can cost more than one with the highest rate. Recent months understate returns because items are returned with a delay; say so if the period ends in the current month.",
+    "tags": [
+      "returns",
+      "return rate",
+      "categories",
+      "quality",
+      "refunds"
+    ],
+    "tables": [
+      "order_items",
+      "products"
+    ],
+    "status": "approved"
+  },
+  {
+    "id": "aov_traffic_source",
+    "question": "What is the average order value by traffic source?",
+    "sql": "WITH order_value AS (\n  SELECT oi.order_id, oi.user_id, SUM(oi.sale_price) AS value\n  FROM `bigquery-public-data.thelook_ecommerce.order_items` oi\n  WHERE oi.status NOT IN ('Cancelled', 'Returned')\n    AND DATE(oi.created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)\n  GROUP BY oi.order_id, oi.user_id\n)\nSELECT\n  u.traffic_source,\n  COUNT(*) AS orders,\n  COUNT(DISTINCT ov.user_id) AS customers,\n  ROUND(SUM(ov.value), 2) AS revenue,\n  ROUND(AVG(ov.value), 2) AS aov,\n  ROUND(SAFE_DIVIDE(COUNT(*), COUNT(DISTINCT ov.user_id)), 2) AS orders_per_customer\nFROM order_value ov\nJOIN `bigquery-public-data.thelook_ecommerce.users` u ON u.id = ov.user_id\nGROUP BY u.traffic_source\nORDER BY aov DESC",
+    "report": "AOV = revenue of sold items / number of orders with at least one sold item; the traffic source is the customer's acquisition channel (users.traffic_source), not the source of each visit. Show AOV next to orders, customers and orders per customer: a channel with lower AOV but more frequent purchases can be worth more. Differences of a few percent in AOV are usually not material.",
+    "tags": [
+      "aov",
+      "average order value",
+      "traffic source",
+      "marketing",
+      "channels",
+      "acquisition"
+    ],
+    "tables": [
+      "order_items",
+      "users"
+    ],
+    "status": "approved"
+  },
+  {
+    "id": "quarterly_report",
+    "question": "Make a Q1 2025 report with insights and action items for Q2.",
+    "sql": [
+      "SELECT\n  IF(DATE(oi.created_at) >= DATE '2025-01-01', 'Q1 2025', 'Q4 2024') AS quarter,\n  ROUND(SUM(oi.sale_price), 2) AS revenue,\n  COUNT(DISTINCT oi.order_id) AS orders,\n  COUNT(DISTINCT oi.user_id) AS customers,\n  ROUND(SAFE_DIVIDE(SUM(oi.sale_price), COUNT(DISTINCT oi.order_id)), 2) AS aov\nFROM `bigquery-public-data.thelook_ecommerce.order_items` oi\nWHERE oi.status NOT IN ('Cancelled', 'Returned')\n  AND DATE(oi.created_at) BETWEEN DATE '2024-10-01' AND DATE '2025-03-31'\nGROUP BY quarter\nORDER BY quarter DESC",
+      "SELECT\n  p.category,\n  ROUND(SUM(IF(DATE(oi.created_at) >= DATE '2025-01-01', oi.sale_price, 0)), 2) AS revenue_q1_2025,\n  ROUND(SUM(IF(DATE(oi.created_at) < DATE '2025-01-01', oi.sale_price, 0)), 2) AS revenue_q4_2024,\n  ROUND(SAFE_DIVIDE(SUM(IF(DATE(oi.created_at) >= DATE '2025-01-01', oi.sale_price, 0)), SUM(IF(DATE(oi.created_at) < DATE '2025-01-01', oi.sale_price, 0))) - 1, 4) AS growth_qoq\nFROM `bigquery-public-data.thelook_ecommerce.order_items` oi\nJOIN `bigquery-public-data.thelook_ecommerce.products` p ON p.id = oi.product_id\nWHERE oi.status NOT IN ('Cancelled', 'Returned')\n  AND DATE(oi.created_at) BETWEEN DATE '2024-10-01' AND DATE '2025-03-31'\nGROUP BY p.category\nORDER BY growth_qoq DESC"
+    ],
+    "report": "A quarterly report compares the quarter with the previous one (and with the same quarter a year earlier when seasonality matters). Structure: Executive summary (2-3 sentences with the headline numbers), Key metrics (revenue, orders, customers, AOV, return rate with QoQ change), Insights (category winners and losers, channel mix, returns), Action items for the next quarter (each tied to an insight, with an owner area and a measurable target), Methodology & assumptions (definitions, period boundaries, UTC dates).",
+    "tags": [
+      "report",
+      "quarterly",
+      "q1",
+      "insights",
+      "action items",
+      "kpi",
+      "qoq",
+      "summary"
+    ],
+    "tables": [
+      "order_items",
+      "products"
+    ],
+    "status": "approved"
+  },
+  {
+    "id": "new_customer_cohorts",
+    "question": "How well do new customers come back after their first purchase, by monthly cohort?",
+    "sql": "WITH sold AS (\n  SELECT user_id, order_id, DATE(created_at) AS day\n  FROM `bigquery-public-data.thelook_ecommerce.order_items`\n  WHERE status NOT IN ('Cancelled', 'Returned')\n),\nfirst_purchase AS (\n  SELECT user_id, MIN(day) AS first_day FROM sold GROUP BY user_id\n)\nSELECT\n  FORMAT_DATE('%Y-%m', f.first_day) AS cohort,\n  COUNT(DISTINCT f.user_id) AS new_customers,\n  COUNT(DISTINCT IF(s.day > f.first_day AND s.day <= DATE_ADD(f.first_day, INTERVAL 90 DAY), f.user_id, NULL)) AS repeat_within_90d,\n  ROUND(SAFE_DIVIDE(COUNT(DISTINCT IF(s.day > f.first_day AND s.day <= DATE_ADD(f.first_day, INTERVAL 90 DAY), f.user_id, NULL)), COUNT(DISTINCT f.user_id)), 4) AS repeat_rate_90d\nFROM first_purchase f\nJOIN sold s USING (user_id)\nWHERE f.first_day BETWEEN DATE '2025-01-01' AND DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)\nGROUP BY cohort\nORDER BY cohort",
+    "report": "A cohort is the month of a customer's first sold item (glossary: new customer). Retention is measured as the share of the cohort with another sold item within 90 days of the first one; cohorts younger than 90 days are excluded because their window is not complete. Look for a trend across cohorts and for months that stand out, and relate them to acquisition channels if asked why.",
+    "tags": [
+      "cohorts",
+      "new customers",
+      "retention",
+      "repeat purchase",
+      "lifecycle",
+      "onboarding"
+    ],
+    "tables": [
+      "order_items"
+    ],
+    "status": "approved"
+  },
+  {
+    "id": "margin_by_category",
+    "question": "Which categories have the best gross margin?",
+    "sql": "SELECT\n  p.category,\n  ROUND(SUM(oi.sale_price), 2) AS revenue,\n  ROUND(SUM(oi.sale_price - p.cost), 2) AS gross_margin,\n  ROUND(SAFE_DIVIDE(SUM(oi.sale_price - p.cost), SUM(oi.sale_price)), 4) AS margin_pct,\n  COUNT(*) AS units_sold\nFROM `bigquery-public-data.thelook_ecommerce.order_items` oi\nJOIN `bigquery-public-data.thelook_ecommerce.products` p ON p.id = oi.product_id\nWHERE oi.status NOT IN ('Cancelled', 'Returned')\n  AND DATE(oi.created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)\nGROUP BY p.category\nORDER BY gross_margin DESC",
+    "report": "Gross margin = sale_price - products.cost over sold items; margin % = margin / revenue. Rank by absolute margin (what the category contributes) and show margin % next to it (how efficient it is): the two rankings often differ. Returns are excluded from both revenue and margin; logistics and marketing costs are not in the data, so this is product margin only - say so.",
+    "tags": [
+      "margin",
+      "gross margin",
+      "profit",
+      "profitability",
+      "categories",
+      "cost"
+    ],
+    "tables": [
+      "order_items",
+      "products"
+    ],
+    "status": "approved"
+  },
+  {
+    "id": "repeat_customers",
+    "question": "What share of our customers are repeat buyers?",
+    "sql": "WITH per_customer AS (\n  SELECT user_id, COUNT(DISTINCT order_id) AS orders, SUM(sale_price) AS revenue\n  FROM `bigquery-public-data.thelook_ecommerce.order_items`\n  WHERE status NOT IN ('Cancelled', 'Returned')\n  GROUP BY user_id\n)\nSELECT\n  COUNT(*) AS customers,\n  COUNTIF(orders >= 2) AS repeat_customers,\n  ROUND(SAFE_DIVIDE(COUNTIF(orders >= 2), COUNT(*)), 4) AS repeat_share,\n  ROUND(SAFE_DIVIDE(SUM(IF(orders >= 2, revenue, 0)), SUM(revenue)), 4) AS repeat_revenue_share,\n  ROUND(AVG(IF(orders >= 2, revenue, NULL)), 2) AS avg_revenue_repeat,\n  ROUND(AVG(IF(orders = 1, revenue, NULL)), 2) AS avg_revenue_one_time\nFROM per_customer",
+    "report": "Repeat customer (glossary) = two or more distinct orders with sold items, all time unless a period is given. Report both the share of customers and the share of revenue they bring, plus average revenue of repeat versus one-time buyers: this shows how much loyalty is worth. If the user gives a period, count orders within it and say that short periods understate repeat behaviour.",
+    "tags": [
+      "repeat customers",
+      "loyalty",
+      "returning customers",
+      "retention",
+      "customer value"
+    ],
+    "tables": [
+      "order_items"
+    ],
+    "status": "approved"
+  },
+  {
+    "id": "top_products_category",
+    "question": "What were the best-selling products in Outerwear & Coats in the last 90 days?",
+    "sql": "SELECT\n  p.id AS product_id,\n  p.name,\n  p.brand,\n  COUNT(*) AS units_sold,\n  ROUND(SUM(oi.sale_price), 2) AS revenue,\n  ROUND(AVG(oi.sale_price), 2) AS avg_price\nFROM `bigquery-public-data.thelook_ecommerce.order_items` oi\nJOIN `bigquery-public-data.thelook_ecommerce.products` p ON p.id = oi.product_id\nWHERE oi.status NOT IN ('Cancelled', 'Returned')\n  AND p.category = 'Outerwear & Coats'\n  AND DATE(oi.created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)\nGROUP BY product_id, p.name, p.brand\nORDER BY revenue DESC\nLIMIT 10",
+    "report": "Best sellers are ranked by revenue of sold items; units and average price are shown to separate volume hits from expensive items. Products are listed with id, name and brand. Category names must match products.category exactly (e.g. 'Outerwear & Coats'); check with SELECT DISTINCT category when unsure. With few sales per product, say that the ranking is sensitive to single orders.",
+    "tags": [
+      "products",
+      "best sellers",
+      "top products",
+      "category",
+      "assortment",
+      "units"
+    ],
+    "tables": [
+      "order_items",
+      "products"
+    ],
+    "status": "approved"
+  },
+  {
+    "id": "category_growth_yoy",
+    "question": "Which categories grew the fastest year over year?",
+    "sql": "WITH yearly AS (\n  SELECT\n    p.category,\n    SUM(IF(DATE(oi.created_at) BETWEEN DATE '2025-01-01' AND DATE '2025-10-31', oi.sale_price, 0)) AS revenue_2025,\n    SUM(IF(DATE(oi.created_at) BETWEEN DATE '2024-01-01' AND DATE '2024-10-31', oi.sale_price, 0)) AS revenue_2024\n  FROM `bigquery-public-data.thelook_ecommerce.order_items` oi\n  JOIN `bigquery-public-data.thelook_ecommerce.products` p ON p.id = oi.product_id\n  WHERE oi.status NOT IN ('Cancelled', 'Returned')\n    AND DATE(oi.created_at) BETWEEN DATE '2024-01-01' AND DATE '2025-10-31'\n  GROUP BY p.category\n)\nSELECT\n  category,\n  ROUND(revenue_2024, 2) AS revenue_2024,\n  ROUND(revenue_2025, 2) AS revenue_2025,\n  ROUND(revenue_2025 - revenue_2024, 2) AS change_usd,\n  ROUND(SAFE_DIVIDE(revenue_2025, revenue_2024) - 1, 4) AS growth_yoy\nFROM yearly\nORDER BY growth_yoy DESC",
+    "report": "Year-over-year growth compares the same calendar window in both years (here January-October), never a full year with a partial one. Show growth in % and the change in USD: a small category can double while adding little. Name the categories that contribute most of the total change.",
+    "tags": [
+      "growth",
+      "yoy",
+      "year over year",
+      "categories",
+      "trend",
+      "comparison"
+    ],
+    "tables": [
+      "order_items",
+      "products"
+    ],
+    "status": "approved"
+  },
+  {
+    "id": "gender_split",
+    "question": "What is the gender split of our buyers in 2025 by revenue?",
+    "sql": "SELECT\n  COALESCE(u.gender, 'Unknown') AS gender,\n  ROUND(SUM(oi.sale_price), 2) AS revenue,\n  COUNT(DISTINCT oi.order_id) AS orders,\n  COUNT(DISTINCT oi.user_id) AS active_buyers,\n  ROUND(SUM(oi.sale_price) * 100.0 / SUM(SUM(oi.sale_price)) OVER (), 1) AS revenue_share_pct\nFROM `bigquery-public-data.thelook_ecommerce.order_items` oi\nJOIN `bigquery-public-data.thelook_ecommerce.users` u ON u.id = oi.user_id\nWHERE oi.status NOT IN ('Cancelled', 'Returned')\n  AND DATE(oi.created_at) BETWEEN DATE '2025-01-01' AND DATE '2025-12-31'\nGROUP BY gender\nORDER BY revenue DESC",
+    "report": "Buyer gender split: revenue = SUM(sale_price) of sold items (status not Cancelled/Returned) joined to users.gender; share via window SUM over all genders; report revenue, orders, distinct buyers and share per gender.",
+    "tags": [
+      "gender",
+      "demographics",
+      "revenue share",
+      "buyers"
+    ],
+    "tables": [],
+    "status": "approved",
+    "source": {
+      "candidate_id": "cand_91a27cea",
+      "trace_id": "2f13c21093844c41",
+      "user_role": "ceo",
+      "approved_at": "2026-11-22T13:28:35+00:00"
+    }
+  }
+]

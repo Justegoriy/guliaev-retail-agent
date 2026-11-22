@@ -19,6 +19,8 @@ from pydantic import BaseModel
 
 from retail_agent.graph import memory
 from retail_agent.graph.state import AgentState, GuardDecision
+from retail_agent.knowledge import golden
+from retail_agent.knowledge.golden import CandidateStore, GoldenIndex
 from retail_agent.observability.logger import log_event
 from retail_agent.prompts.context import (
     PromptInputs,
@@ -34,6 +36,8 @@ from retail_agent.tools.registry import ToolContext
 AuxFactory = Callable[[type[BaseModel]], Runnable[Any, Any]]
 
 EMPTY_ANSWER = "I could not produce an answer this time. Please rephrase the question."
+# Turns that are not about the data get no precedents (saves an embedding call).
+NO_PRECEDENTS_CATEGORIES = frozenset({"greeting", "preferences", "report_management"})
 
 
 @dataclass
@@ -45,6 +49,8 @@ class AgentDeps:
     aux: AuxFactory | None = None  # None: rules-only guard, no context extraction/summaries
     prompt_sources: PromptSources = field(default_factory=PromptSources)
     today: Callable[[], date] = date.today
+    golden: GoldenIndex | None = None
+    candidates: CandidateStore | None = None
 
     def session_reports(self, ids: Sequence[str]) -> list[SessionReport]:
         """Reports of this conversation that still exist, with their titles."""
@@ -103,6 +109,21 @@ class AgentNodes:
 
         return call
 
+    def precedents(self, state: AgentState) -> list[golden.Retrieved]:
+        """Golden trios for this turn, found by the message plus the topic it continues."""
+        index = self.deps.golden
+        category = (state.get("guard") or {}).get("category")
+        if index is None or category in NO_PRECEDENTS_CATEGORIES:
+            return []
+        query = memory.retrieval_query(state["messages"], state.get("analysis_context"))
+        try:
+            return index.retrieve(query)
+        except Exception as exc:
+            log_event(
+                "golden_degraded", level="warning", stage="retrieve", error=type(exc).__name__
+            )
+            return []
+
     def system_prompt(self, state: AgentState) -> str:
         """Built once per turn: persona and glossary are re-read only if their files changed."""
         trace_id = state.get("trace_id") or ""
@@ -113,6 +134,7 @@ class AgentNodes:
         glossary = deps.prompt_sources.glossary.get()
         guard = state.get("guard") or {}
         report_ids = state.get("session_report_ids") or []
+        precedents = self.precedents(state)
         inputs = PromptInputs(
             user=deps.tool_ctx.user,
             today=deps.today(),
@@ -123,12 +145,14 @@ class AgentNodes:
             analysis_context=state.get("analysis_context"),
             session_reports=deps.session_reports(report_ids) if report_ids else [],
             pii_request=bool(guard.get("pii_request")),
+            golden=golden.precedents_block(precedents) if precedents else "",
         )
         prompt = build_system_prompt(inputs)
         log_event(
             "prompt_built",
             persona_version=persona.version,
             glossary_version=glossary.version,
+            golden_ids=[p.trio.id for p in precedents],
             chars=len(prompt),
             has_summary=bool(inputs.history_summary),
             has_analysis_context=bool(inputs.analysis_context),
