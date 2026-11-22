@@ -2,10 +2,8 @@
 
 import argparse
 import sys
-import time
 from collections.abc import Callable
 
-from langgraph.errors import GraphRecursionError
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
 from rich.console import Console
@@ -21,20 +19,15 @@ from retail_agent.graph.builder import (
     STAGE_START,
     AgentSession,
     PendingConfirmation,
-    TurnOutcome,
     create_session,
 )
-from retail_agent.observability import callbacks, inspect, logger, tracing
+from retail_agent.observability import inspect, logger, tracing
 from retail_agent.observability.logger import log_event
 from retail_agent.personalization.profile import PreferenceRejected, display
 from retail_agent.settings import Settings, get_settings
+from retail_agent.turns import Turn, TurnResult
 
 EXIT_COMMANDS = {"/exit", "/quit"}
-STEP_LIMIT_MESSAGE = (
-    "The request turned out to be too complex to finish in one go. "
-    "Please narrow it down or split it into smaller questions."
-)
-CANCELLED_MESSAGE = "Cancelled. Ask again or try something else."
 RESUME_SHOW_TURNS = 3
 RESUME_ANSWER_CHARS = 600
 HELP = """\
@@ -139,83 +132,27 @@ def _ask_confirmations(
 # -- turns ----------------------------------------------------------------------------
 
 
-def _log_turn_end(
-    session: AgentSession, trace_id: str, started: float, status: str, level: str = "info", **extra
-) -> None:
-    usage = callbacks.pop_usage(trace_id)
-    turn = session.deps.tool_ctx.turn
-    log_event(
-        "turn_end",
-        level=level,
-        status=status,
-        latency_ms=int((time.perf_counter() - started) * 1000),
-        llm_calls=usage.llm_calls,
-        input_tokens=usage.input_tokens,
-        output_tokens=usage.output_tokens,
-        sql_count=len(turn.executed),
-        sql_failures=turn.sql_failures,
-        bq_bytes=turn.bq_bytes,
-        **extra,
-    )
-
-
-def _call(
-    session: AgentSession,
-    action: Callable[[Callable[[str], None]], TurnOutcome],
-    trace_id: str,
-    started: float,
-) -> TurnOutcome | None:
-    """Run a graph call under a status line; on failure or Ctrl+C report it and return None."""
-    try:
-        with Status(STAGE_START, console=console) as status:
-            return action(status.update)
-    except KeyboardInterrupt:
-        try:
-            session.cancel_turn()
-        except Exception as exc:
-            log_event("cancel_failed", level="error", error=type(exc).__name__)
-        _log_turn_end(session, trace_id, started, "cancelled", level="warning")
-        console.print(f"[yellow]{CANCELLED_MESSAGE}[/yellow]")
-    except GraphRecursionError:
-        _log_turn_end(session, trace_id, started, "error", "warning", error_kind="step_limit")
-        console.print(f"[yellow]{STEP_LIMIT_MESSAGE}[/yellow] [dim](trace: {trace_id})[/dim]")
-    except Exception as exc:
-        kind = errors.classify(exc)
-        _log_turn_end(
-            session,
-            trace_id,
-            started,
-            "error",
-            "error",
-            error_kind=kind.value,
-            error=type(exc).__name__,
-            detail=str(exc)[:500],
-        )
-        console.print(f"[red]{errors.user_message(kind, trace_id)}[/red]")
-    return None
+def _with_status(action: Callable[[Callable[[str], None]], TurnResult]) -> TurnResult:
+    with Status(STAGE_START, console=console) as status:
+        return action(status.update)
 
 
 def _run_turn(session: AgentSession, text: str, read: Callable[[str], str]) -> None:
-    trace_id = logger.new_trace_id()
-    log_event("turn_start", length=len(text))
-    started = time.perf_counter()
-    outcome = _call(
-        session, lambda on_stage: session.run_turn(text, trace_id, on_stage), trace_id, started
-    )
+    turn = Turn(session)
+    result = _with_status(lambda on_stage: turn.start(text, on_stage))
     next_message: str | None = None
-    while outcome is not None and outcome.pending:
-        answers, typed = _ask_confirmations(outcome.pending, read)
+    while result.status == "pending" and result.outcome is not None:
+        answers, typed = _ask_confirmations(result.outcome.pending, read)
         next_message = next_message or typed
-        outcome = _call(
-            session,
-            lambda on_stage, answers=answers: session.resume(answers, trace_id, on_stage),
-            trace_id,
-            started,
-        )
-    if outcome is not None:
-        _log_turn_end(session, trace_id, started, "blocked" if outcome.blocked else "ok")
-        console.print(Markdown(outcome.answer))
-        console.print(f"[dim]trace: {trace_id}[/dim]")
+        result = _with_status(lambda on_stage, answers=answers: turn.resume(answers, on_stage))
+    if result.status == "cancelled":
+        console.print(f"[yellow]{result.message}[/yellow]")
+    elif result.status == "error":
+        style = "yellow" if result.error_kind == "step_limit" else "red"
+        console.print(f"[{style}]{result.message}[/{style}]")
+    else:
+        console.print(Markdown(result.answer))
+        console.print(f"[dim]trace: {result.trace_id}[/dim]")
     if next_message:
         _run_turn(session, next_message, read)
 

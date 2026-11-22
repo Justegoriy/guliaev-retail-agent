@@ -24,6 +24,7 @@ dependencies = [
     "prompt_toolkit>=3.0.53,<4",
     "tenacity>=9.1,<9.2",
     "numpy>=2.5,<3",
+    "streamlit>=1.67,<1.68",
 ]
 
 [project.optional-dependencies]
@@ -31,6 +32,7 @@ dev = ["pytest>=9.2,<10", "ruff>=0.17,<0.18"]
 
 [project.scripts]
 retail-agent = "retail_agent.cli:main"
+retail-agent-web = "retail_agent.web.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -345,10 +345,10 @@ class AgentSession:
         prefs = self.preferences
         return prefs.get_profile(self.user.user_id) if prefs else UserProfile()
 
-    def set_preference(self, key: str, value: str) -> Preference:
-        """`/prefs set`; raises `PreferenceRejected` with a reason for the user."""
+    def set_preference(self, key: str, value: str, via: str = "cli") -> Preference:
+        """`/prefs set` or the web form; raises `PreferenceRejected` with a reason for the user."""
         return self._require_preferences().set_explicit(
-            self.user.user_id, key, value, via="cli", conversation_id=self.conversation_id
+            self.user.user_id, key, value, via=via, conversation_id=self.conversation_id
         )
 
     def forget_preference(self, key: str) -> bool:
@@ -486,36 +486,68 @@ def load_golden_index(settings: Settings) -> GoldenIndex:
     )
 
 
+@dataclass(frozen=True)
+class AgentResources:
+    """What every user's session shares: clients, schema, knowledge, storage (thread-safe)."""
+
+    settings: Settings
+    runner: BigQueryRunner
+    schema: SchemaCatalog
+    storage: Storage
+    preferences: Preferences
+    golden: GoldenIndex
+    candidates: CandidateStore
+    checkpointer: BaseCheckpointSaver
+    aux: Any
+
+    def session(self, user: UserContext, conversation_id: str | None = None) -> AgentSession:
+        """A session for `user`: tools bound to their access rights, own conversations."""
+        tool_ctx = ToolContext(
+            user=user,
+            conversation_id=conversation_id or "",
+            runner=self.runner,
+            schema=self.schema,
+            settings=self.settings,
+            storage=self.storage,
+            preferences=self.preferences,
+        )
+        tools = build_tools(tool_ctx)
+        deps = AgentDeps(
+            tool_ctx=tool_ctx,
+            tools=tools,
+            agent_model=build_chat_model("main", tools, settings=self.settings),
+            settings=self.settings,
+            aux=self.aux,
+            golden=self.golden,
+            candidates=self.candidates,
+        )
+        log_event("agent_ready", tools=[t.name for t in tools], golden_mode=self.golden.mode)
+        return AgentSession(deps, self.checkpointer, conversation_id)
+
+
+def create_resources(settings: Settings, runner: BigQueryRunner | None = None) -> AgentResources:
+    """Production wiring: BigQuery, schema, Gemini, golden index, SQLite storage/checkpoints."""
+    runner = runner or BigQueryRunner.from_settings(settings)
+    storage = Storage(settings.app_db_path)
+    return AgentResources(
+        settings=settings,
+        runner=runner,
+        schema=SchemaCatalog.load(runner),
+        storage=storage,
+        preferences=Preferences(
+            storage, preference_profile.load_config(settings.preferences_config_path)
+        ),
+        golden=load_golden_index(settings),
+        candidates=CandidateStore(settings.golden_candidates_path),
+        checkpointer=open_checkpointer(settings.checkpoint_db_path),
+        aux=_aux_factory(settings),
+    )
+
+
 def create_session(
     user: UserContext,
     settings: Settings,
     conversation_id: str | None = None,
     runner: BigQueryRunner | None = None,
 ) -> AgentSession:
-    """Production wiring: BigQuery, schema, tools, Gemini models, SQLite storage/checkpoints."""
-    runner = runner or BigQueryRunner.from_settings(settings)
-    schema = SchemaCatalog.load(runner)
-    storage = Storage(settings.app_db_path)
-    tool_ctx = ToolContext(
-        user=user,
-        conversation_id=conversation_id or "",
-        runner=runner,
-        schema=schema,
-        settings=settings,
-        storage=storage,
-        preferences=Preferences(
-            storage, preference_profile.load_config(settings.preferences_config_path)
-        ),
-    )
-    tools = build_tools(tool_ctx)
-    deps = AgentDeps(
-        tool_ctx=tool_ctx,
-        tools=tools,
-        agent_model=build_chat_model("main", tools, settings=settings),
-        settings=settings,
-        aux=_aux_factory(settings),
-        golden=load_golden_index(settings),
-        candidates=CandidateStore(settings.golden_candidates_path),
-    )
-    log_event("agent_ready", tools=[t.name for t in tools], golden_mode=deps.golden.mode)
-    return AgentSession(deps, open_checkpointer(settings.checkpoint_db_path), conversation_id)
+    return create_resources(settings, runner).session(user, conversation_id)
