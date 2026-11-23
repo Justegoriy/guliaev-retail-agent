@@ -146,6 +146,24 @@ def test_no_match_returns_without_asking(h):
     assert h.storage.audit_entries("ceo") == []
 
 
+def test_no_match_is_not_followed_by_broader_criteria_in_the_same_turn(h):
+    """Seen live: "Q1 2025" -> "2025" -> "report" until unrelated reports were offered."""
+    ids = save_two(h)
+    out = h.turn(
+        "delete the report you just made",
+        delete_call("d1", mention="Q3 forecast"),
+        delete_call("d2", mention="review"),
+        AIMessage("Nothing matched; which report do you mean?"),
+    )
+    assert not out.pending and live_ids(h) == set(ids)
+    first, second = tool_results(h, "request_report_deletion")
+    assert first.startswith("NO_MATCH: no reports")
+    assert second.startswith("NO_MATCH: an earlier deletion request in this turn")
+    # The next turn starts fresh: the user names the reports and is asked as usual.
+    out = h.turn("delete the reviews", delete_call("d3", mention="review"))
+    assert {i["id"] for i in out.pending[0].items} == set(ids)
+
+
 def test_mention_finds_reports_by_entity(h):
     h.turn(
         "save",

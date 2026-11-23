@@ -1,0 +1,81 @@
+# Assumptions and open questions
+
+The assignment leaves several decisions open. The prototype is built on the defaults below; each
+can be changed if OpsFleet decides otherwise. Ids (D1, T1...) are referenced from the code
+comments and the other documents.
+
+## Data access
+
+| # | Assumption |
+|---|---|
+| D1 | **Access by product category group.** The dataset has no link between system users and products, so one is introduced: the 26 `products.category` values are grouped into 8 groups (Outerwear & Tailoring, Tops, Bottoms, Dresses & Sets, Underwear & Loungewear, Active & Swim, Special Sizes, Accessories), each category in exactly one group ([config/users.yaml](../config/users.yaml)). An `executive` is a category manager with one or more groups (optionally single categories). Splitting by `department` (Men / Women) was tried first and dropped: two values are too coarse for a real role |
+| D2 | **Outside their scope, users get only anonymised company-wide totals**: revenue, orders, AOV, customers, items sold, return rate, total or monthly, with no breakdown by other categories, products, brands or customers (tool `get_company_benchmark` with fixed SQL). So "my categories vs the company" is possible |
+| D3 | `ceo` and `c_level` have access to all categories |
+| D4 | Users are defined in `config/users.yaml` and chosen with `--user` (or from a list, or in the web sidebar). No password: authentication is simulated. Demo users: `ceo`, `cfo`, `bottoms_manager`, `outerwear_manager` |
+| - | A category manager sees the items of their categories, their revenue, and the orders they were part of. A mixed order counts as one order but only with its allowed items and revenue (`num_of_item` is recounted) |
+
+## PII
+
+| # | Assumption |
+|---|---|
+| D5 | PII fields: `users.first_name`, `last_name`, `email`, `street_address`, `postal_code`, `latitude`, `longitude`, `user_geom` (direct identifiers and precise location, following GDPR/CCPA practice). Not PII: `user_id`, `age`, `gender`, `city`, `state`, `country`, `traffic_source`. The list is in [config/pii_policy.yaml](../config/pii_policy.yaml) |
+| D6 | PII may be used inside SQL (joins, filters, `COUNT(DISTINCT email)`) but is never shown, passed to the model in results, logged, traced, cached or saved in reports |
+| D7 | No protection against re-identification through small groups (k-anonymity) |
+| D8 | Individual customers are shown by id (`Customer #12345`) |
+
+## Reports and destructive operations
+
+| # | Assumption |
+|---|---|
+| D9 | A report is only an explicitly saved document: saved when the user asks, or after the agent offers and the user agrees |
+| D10 | "Client X" in "delete all reports mentioning Client X" is any entity in the report text: brand, product, category or customer id. Matched against title and content (`LIKE`) and the `entities` the model fills in when saving |
+| D11 | Deletion is soft (`deleted_at`) with an audit record. No undo |
+| D12 | Confirmation: preview, then `Delete N reports? [y/N]`. Only `y`/`yes` confirms; anything else cancels. No stronger confirmation for bulk deletes. The pending action lives until the user's next input; a new question cancels it and is answered right away |
+| D13 | No sharing: users see and delete only their own reports, the CEO included |
+| D14 | Reports are markdown. `export_report` (to `exports/`) exists to demonstrate an extension with confirmation, not as a file-format feature |
+
+## Other defaults
+
+| # | Assumption |
+|---|---|
+| D15 | The Golden Bucket is "theoretical" in the assignment, so the prototype has a synthetic seed of 15 trios ([data/golden_trios.json](../data/golden_trios.json)) with embeddings retrieval, and updates through `/good` candidates plus analyst review. The full pipeline is in the HLD |
+| D16 | User preferences are implemented fully in the prototype (explicit and inferred) |
+| D17 | Persona is a text file re-read every turn, global for all users. Preferences take priority for format, the persona sets the tone; guardrails are in the immutable core |
+| D18 | Models: `gemini-3.8-flash` main, `gemini-3.5-flash-lite` for fallback and auxiliary calls (guard, extraction, summaries, eval judge), `gemini-embedding-001`. All configurable in `.env`. Free-tier limits (not guaranteed by Google) are roughly Flash 5 RPM / 20 RPD and Flash-Lite 15 RPM / 500 RPD, counted per model. With a free key it is practical to set `GEMINI_MODEL` to the Flash-Lite model |
+| D19 | Sizing for the HLD: up to 200 executives, up to 20 concurrent sessions, p95 at most 20 s for a simple question, 99.5% availability |
+| D20 | The reviewer uses their own GCP project for BigQuery billing (`GOOGLE_CLOUD_PROJECT`) and their own AI Studio key |
+| D21 | The conversation is in English: prompts, answers and refusals. The input guard's rules also catch Russian injection and data-changing phrasing, so protection does not depend on the attack's language |
+| D22 | No charts in the prototype; they are an extension example in the design |
+| D23 | Chat history is stored in SQLite (LangGraph checkpointer) and survives restarts |
+| D24 | Business metric definitions (revenue, AOV, margin, return rate, active customer, repeat customer, churn, new customer) are in [config/glossary.yaml](../config/glossary.yaml); the agent states the definition it used |
+| D25 | "Now" for relative periods ("last month") is the system date. If there is no data for a period, the agent says so and shows the available range. The public dataset is refreshed daily |
+| D26 | One user per CLI process. In the web app each browser tab picks a user; data is isolated per user as in the CLI |
+| D27 | Tests with `pytest`, lint with `ruff`, GitHub Actions run both (without network) on every push |
+| D28 | A demo web interface (Streamlit, localhost only, no authentication) in addition to the CLI, using the same agent core |
+
+Revenue and order definitions used throughout: a "sale" is an order item whose status is not
+`Cancelled` or `Returned`; revenue is the sum of `sale_price` over sales; return rate is returned
+items over items that were not cancelled.
+
+## Technical decisions
+
+| # | Decision |
+|---|---|
+| T1 | LangGraph as the agent framework (graph of guard, agent, tools; checkpointer; `interrupt` for confirmations; LangSmith) |
+| T2 | Gemini through `langchain-google-genai` in the prototype, Vertex AI in production |
+| T3 | SQLite for the prototype stores; JSON + in-memory embeddings for the Golden Bucket |
+| T4 | Access control by rewriting SQL with `sqlglot`, not by rejecting queries without a filter |
+| T5 | Observability: local JSON logs always, LangSmith optional |
+| T6 | All "lite" implementations of design-only requirements are built (Golden Bucket, learning loop, eval, persona) |
+| T7 | `src` layout; `requirements.txt` ends with `-e .`, so `pip install -r requirements.txt` from the assignment makes `python -m retail_agent` work |
+
+## Open questions for OpsFleet
+
+1. **PII list (D5):** please confirm the fields. Should `city` and `age` be treated as PII?
+2. **Authentication:** which identity provider will executives use in production (Google Workspace,
+   Okta, other)? Where does the mapping from people to category groups live (directory groups)?
+3. **Company aggregates (D2):** which metrics are acceptable as anonymised company totals? May a
+   manager see the share of their categories in total revenue?
+4. **Scale and SLA (D19):** please confirm the sizing assumptions.
+5. **Model (D18):** which Gemini model and which quota tier will you test with? On a free key the
+   main model's daily limit is reached quickly and the agent switches to the fallback.

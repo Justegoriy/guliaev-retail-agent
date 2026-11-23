@@ -670,13 +670,13 @@ preference_signals(id INTEGER PK, user_id, key, value JSON, weight REAL,
 
 ## Шаг 12. Документация и HLD
 
-- [ ] `docs/architecture.md`:
+- [x] `docs/architecture.md`:
   - Mermaid: production-архитектура (TZ §7.2): клиенты → IAP/SSO → Cloud Run agent service → Vertex AI Gemini; BigQuery (RLS, policy tags, authorized views); GCS Golden Bucket → индексатор (Cloud Run Job, Pub/Sub) → Vector Search; Firestore/Cloud SQL (reports, prefs, prompts); Memorystore; Secret Manager; DLP; Cloud Logging/Trace/Monitoring + LangSmith; Admin UI для persona и ревью trios; CI/CD с eval-gate.
   - Mermaid: sequence обработки вопроса, sequence удаления с подтверждением, learning loop (user + system, обновление Golden Bucket), observability и путь PII, прототип vs production (что чем заменяется).
   - Таблица сервисов: что, зачем, альтернативы, почему отклонены.
   - **Таблица хранения данных:** данные → прототип / production → доступ → retention → PII (TZ §7.3).
   - **Взаимодействие компонентов:** синхронные вызовы и асинхронные события (Pub/Sub topics: `feedback`, `preference-signals`, `golden-candidates`, `trio-ingested`), форматы сообщений.
-- [ ] `docs/technical_design.md`:
+- [x] `docs/technical_design.md`:
   - обоснование выбора (GCP, Gemini Flash/Flash-Lite, LangGraph + опыт, sqlglot, SQLite → Firestore/Cloud SQL, LangSmith);
   - data flow, где хранятся и как обрабатываются данные, путь PII;
   - error handling и fallback (таблица: сбой → реакция → что видит пользователь);
@@ -685,8 +685,17 @@ preference_signals(id INTEGER PK, user_id, key, value JSON, weight REAL,
   - метрики observability и как делать deep dive (`/trace`, LangSmith, `/stats`);
   - QA-стратегия (offline eval, security red-team, judge, UX-метрики, eval-gate);
   - ограничения прототипа и что сделал бы дальше.
-- [ ] `docs/assumptions.md`: решения D1–D27 + открытые вопросы §13.
-- [ ] `README.md`: что это, быстрый старт (Python, venv, `pip install -r requirements.txt`, `gcloud auth application-default login`, `.env`, `python -m retail_agent --user bottoms_manager`), демо-пользователи, команды CLI, пример сессии (транскрипт), как запустить тесты/eval, LangSmith (опционально), ссылки на docs, framework choice + опыт.
+- [x] `docs/assumptions.md`: решения D1–D27 + открытые вопросы §13.
+- [x] `README.md`: что это, быстрый старт (Python, venv, `pip install -r requirements.txt`, `gcloud auth application-default login`, `.env`, `python -m retail_agent --user bottoms_manager`), демо-пользователи, команды CLI, пример сессии (транскрипт), как запустить тесты/eval, LangSmith (опционально), ссылки на docs, framework choice + опыт.
+
+
+→ Сделано. Документы на английском (как `task.md` и код), для проверяющих OpsFleet.
+- **`architecture.md`:** production HLD (IAP + SSO → Cloud Run agent → Vertex AI Gemini / Vector Search; BigQuery с row access policies и policy tags; Firestore, Memorystore, GCS, Pub/Sub, DLP, Secret Manager, Cloud Logging/Trace/Monitoring + LangSmith, CI/CD с eval-gate), таблица сервисов (что, зачем, альтернативы), sequence ответа на вопрос и удаления, learning loop, observability и путь PII (с таблицей «где PII есть / нет»), прототип vs production, таблица хранения (данные → прототип → production → доступ → retention → PII), синхронные вызовы и Pub/Sub topics (`feedback`, `preference-signals`, `golden-candidates`, `trio-ingested`, `persona-published`, `eval-completed`) с форматами сообщений.
+- **`technical_design.md`:** выбор стека и почему LangGraph (+ альтернативы), устройство хода и `run_sql` по шагам, по каждому из 8 требований — production-дизайн и что сделано в прототипе со ссылками на код, история и уточнения, таблица сбоев «сбой → реакция → что видит пользователь», как добавить tool на примере `export_report` и эскизы `generate_chart`, `send_report_email`, `search_web_trends`, MCP, ограничения прототипа и следующие шаги.
+- **`assumptions.md`:** D1–D28, T1–T7, определения выручки и продаж, открытые вопросы §13.
+- **`README.md`:** быстрый старт (venv, `pip install -r requirements.txt`, gcloud ADC + quota project + включение BigQuery API, `.env`, совет про Flash-Lite на free key), реальный транскрипт CLI (A1, помесячная выручка, A4, A5, A8, превью удаления), демо-пользователи, команды, веб, что делает прототип, тесты / eval / failure report, observability и LangSmith, настройки, структура, выбор фреймворка и опыт.
+- **Найдено при записи транскрипта и исправлено:** Gemini 3.8 Flash отвечал 503, ход с сохранением отчёта упал, и на «удали отчёт, который ты только что сделал» Flash-Lite после `NO_MATCH` сам расширял критерий («Q1 2025» → «2025» → «report») и вышел на старые отчёты из других разговоров. Подтверждение показало именно их (механизм сработал), но расширять критерии модель не должна. Теперь после `NO_MATCH` повторный запрос на удаление в том же ходе не ищет ничего и велит спросить пользователя (`TurnState.deletion_no_match`, событие `deletion_retry_refused`), плюс правило в описании tool; тест `test_no_match_is_not_followed_by_broader_criteria_in_the_same_turn`. Цена: «удали отчёты про Jeans и про Swim» двумя вызовами, где первый пуст, во втором не сработает — пользователь получит вопрос. Удалённые при проверке тестовые отчёты восстановлены (soft delete).
+- Замечено, не исправлено: если модель упала после успешного `save_report`, пользователь видит «модель недоступна», хотя отчёт сохранён (он есть в `/reports` и в списке отчётов разговора).
 
 **Готово, когда:** человек без контекста по README поднимает проект на чистой машине (проверить в новом venv).
 

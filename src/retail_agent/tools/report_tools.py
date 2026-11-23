@@ -287,9 +287,17 @@ def _request_report_deletion(ctx: ToolContext) -> BaseTool:
                 "ERROR(invalid_args): say which reports to delete: report_ids, mention "
                 "or this_conversation=true."
             )
+        if ctx.turn.deletion_no_match:
+            log_event("deletion_retry_refused", mention=mention or "", ids=report_ids or [])
+            return (
+                "NO_MATCH: an earlier deletion request in this turn matched nothing, so no "
+                "other criteria are searched. Nothing was deleted. Tell the user and ask which "
+                "reports they mean."
+            )
         candidates, not_found = deletion_candidates(ctx, report_ids, mention, this_conversation)
         note = _not_found_note(not_found)
         if not candidates:
+            ctx.turn.deletion_no_match = True
             log_event("deletion_no_match", not_found=len(not_found))
             return f"NO_MATCH: no reports of the user match, nothing was deleted.{note}"
 
@@ -331,8 +339,8 @@ def _request_report_deletion(ctx: ToolContext) -> BaseTool:
             "Delete the user's own saved reports. Pass report_ids, a mention to search for, "
             "and/or this_conversation=true. The system shows the matching reports to the "
             "user and asks for confirmation itself; you cannot confirm. Results: "
-            "DELETED, CANCELLED, NO_MATCH (nothing matched, nothing asked). Report the "
-            "result as is."
+            "DELETED, CANCELLED, NO_MATCH (nothing matched, nothing asked). After NO_MATCH "
+            "do not retry with other or broader criteria: tell the user and ask."
         ),
         args_schema=DeletionArgs,
     )

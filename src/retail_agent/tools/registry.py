@@ -42,12 +42,16 @@ class TurnState:
         self.sql_failures = 0
         self.bq_bytes = 0
         self.executed: list[ExecutedQuery] = []
+        # A deletion request in this turn matched nothing: the model must not go on to try
+        # broader criteria by itself ("Q1 2025" -> "2025" -> "report").
+        self.deletion_no_match = False
 
     def reset(self) -> None:
         with self._lock:
             self.sql_failures = 0
             self.bq_bytes = 0
             self.executed = []
+            self.deletion_no_match = False
 
     def add_failure(self) -> int:
         with self._lock:
