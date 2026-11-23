@@ -15,7 +15,7 @@ from typing import Any, TypeVar
 import pandas as pd
 import requests
 from google.api_core import exceptions as gexc
-from google.auth.exceptions import DefaultCredentialsError
+from google.auth.exceptions import DefaultCredentialsError, TransportError
 from google.cloud import bigquery
 from tenacity import (
     RetryCallState,
@@ -41,6 +41,7 @@ _TRANSIENT_TYPES = (
     gexc.DeadlineExceeded,
     gexc.BadGateway,
     gexc.GatewayTimeout,
+    TransportError,  # google-auth could not reach the token endpoint
     requests.exceptions.ConnectionError,
     requests.exceptions.Timeout,
     ConnectionError,
@@ -138,7 +139,10 @@ class BigQueryRunner:
     def dry_run(self, sql: str) -> int:
         """Validate the query and return the number of bytes it would scan."""
         config = bigquery.QueryJobConfig(dry_run=True, use_query_cache=False)
-        job = self._call("dry_run", lambda: self.client.query(sql, job_config=config))
+        job = self._call(
+            "dry_run",
+            lambda: self.client.query(sql, job_config=config, **self._rpc_options(job=True)),
+        )
         bytes_processed = int(job.total_bytes_processed or 0)
         log_event("sql_dry_run", sql=sql, bytes=bytes_processed)
         if bytes_processed > self.max_bytes_billed:
@@ -160,7 +164,7 @@ class BigQueryRunner:
         started = time.perf_counter()
 
         def run() -> tuple[pd.DataFrame, Any]:
-            job = self.client.query(sql, job_config=config)
+            job = self.client.query(sql, job_config=config, **self._rpc_options(job=True))
             try:
                 rows = job.result(timeout=self.timeout_s)
             except TimeoutError:
@@ -197,7 +201,9 @@ class BigQueryRunner:
 
     def get_table_metadata(self, table_name: str) -> dict[str, Any]:
         table_ref = f"{self.dataset_id}.{table_name}"
-        table = self._call("get_table", lambda: self.client.get_table(table_ref))
+        table = self._call(
+            "get_table", lambda: self.client.get_table(table_ref, **self._rpc_options())
+        )
         return {
             "name": table_name,
             "num_rows": int(table.num_rows or 0),
@@ -216,6 +222,17 @@ class BigQueryRunner:
         return self.get_table_metadata(table_name)["columns"]
 
     # -- internals ----------------------------------------------------------------
+
+    def _rpc_options(self, *, job: bool = False) -> dict[str, Any]:
+        """Bound every API call by `timeout_s` and leave retries to `_call`.
+
+        The client's own retry keeps retrying connection errors for up to 10 minutes, so
+        without this a network outage froze the CLI's start-up check and every turn.
+        """
+        options: dict[str, Any] = {"retry": None, "timeout": self.timeout_s}
+        if job:
+            options["job_retry"] = None
+        return options
 
     def _call(self, op: str, fn: Callable[[], T]) -> T:
         def log_retry(state: RetryCallState) -> None:

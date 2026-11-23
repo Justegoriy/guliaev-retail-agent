@@ -22,6 +22,7 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
+from retail_agent.console import tolerate_unencodable_output
 from retail_agent.settings import Settings, get_settings
 
 Event = dict[str, Any]
@@ -478,6 +479,7 @@ def render_stats(stats: Stats, title: str = "Agent statistics") -> RenderableTyp
 
 
 def main(argv: list[str] | None = None) -> int:
+    tolerate_unencodable_output()
     parser = argparse.ArgumentParser(
         prog="python -m retail_agent.observability.inspect",
         description="Inspect the agent's event log.",

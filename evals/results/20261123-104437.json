@@ -1,0 +1,88 @@
+{
+  "started": "20261123-104437",
+  "commit": "34092e6",
+  "models": {
+    "main": "gemini-3.8-flash",
+    "fallback": "gemini-3.5-flash-lite",
+    "aux": "gemini-3.5-flash-lite",
+    "judge": "gemini-3.8-flash"
+  },
+  "filters": {
+    "only": [
+      "structure"
+    ],
+    "case": [
+      "a1_available_data"
+    ]
+  },
+  "summary": {
+    "total": 1,
+    "passed": 1,
+    "by_category": {
+      "structure": {
+        "passed": 1,
+        "total": 1
+      }
+    },
+    "judge_mean": 5.0,
+    "judge_unavailable": 0,
+    "models_used": {
+      "guard": {
+        "gemini-3.5-flash-lite": 1
+      },
+      "main": {
+        "gemini-3.5-flash-lite": 2
+      }
+    },
+    "accuracy_passed": 0,
+    "accuracy_total": 0,
+    "llm_calls": 3,
+    "input_tokens": 11157,
+    "output_tokens": 285
+  },
+  "cases": [
+    {
+      "id": "a1_available_data",
+      "category": "structure",
+      "user": "ceo",
+      "passed": true,
+      "failures": [],
+      "turns": [
+        {
+          "text": "What data is available to me?",
+          "answer": "As CEO with access to all product categories, you can analyse data across the store's entire catalogue and customer base. \n\nThe available data covers four core tables:\n\n- **orders**: Customer orders including status, gender, timestamps (created, shipped, delivered, returned) and item count.\n- **order_items**: Individual sold items, serving as the source for revenue and pricing metrics, with status and timestamps.\n- **products**: The product catalogue including cost, retail price, brand, department, and category (26 categories spanning all departments).\n- **users**: Customer demographic and acquisition data (age, gender, city, state, country, traffic source, sign-up date). Personal data (names, emails, addresses, coordinates) is strictly restricted.\n\n**Example analyses you can run:**\n- Revenue, orders, and average order value (AOV) by month, year, category, or brand.\n- Profit margins and top-performing products or brands.\n- Return and cancellation rates across categories and regions.\n- Customer acquisition channels, active customer counts, repeat purchase rates, and geographic distribution (e.g. state-level spending).",
+          "status": "ok",
+          "blocked": false,
+          "trace_id": "e589873a730e469f",
+          "tools": [
+            "describe_dataset"
+          ],
+          "tool_results": [
+            [
+              "describe_dataset",
+              "I can analyse four tables of the online store:\n\n- **orders** (~124,780 rows) - One row per customer order.\n  Fields: order_id, user_id, status, gender, created_at, returned_at, shipped_at, delivered_at, num_of_item\n- **order_items** (~180,764 rows) - One row per item sold; the source of revenue.\n  Fields: id, order_id, user_id, product_id, inventory_item_id, status, created_at, shipped_at, delivered_at, returned_at, sale_price\n- **products** (~29,120 rows) - Product catalogue; `category` defines data access.\n  Fields: id, cost, category, name, brand, retail_price, department, sku, distribution_center_id\n- **users** (~100,000 rows) - Customers. Contains PII.\n  Fields: id, age, gender, state, city, country, traffic_source, created_at\n  Personal data (first_name, last_name, email, street_address, postal_code, latitude, longitude, user_geom) is never shown.\n\nExamples of what you can ask about:\n- Revenue, orders and average order value by period, category, brand or department\n- Top products and brands, margins (sale price vs cost)\n- Return and cancellation rates\n- Customer segments by age, gender, country and acquisition channel\n- Repeat customers, cohorts by sign-up month, delivery times\n\nYour data access: all product categories.\n\n(The user does not see this text: in your answer, name each table with what it holds, give a few example questions and state the user's data access.)"
+            ]
+          ],
+          "sql": [],
+          "confirmation": false,
+          "error": null,
+          "latency_ms": 19212
+        }
+      ],
+      "accuracy": null,
+      "judge": {
+        "intent": 5,
+        "grounded": 5,
+        "format": 5,
+        "action_items": null,
+        "overall": 5,
+        "reasoning": "The assistant accurately describes the four tables and analytical capabilities based on the evidence without showing SQL, perfectly matching the expected behavior."
+      },
+      "llm_calls": 3,
+      "input_tokens": 11157,
+      "output_tokens": 285,
+      "latency_ms": 20206,
+      "error": null
+    }
+  ]
+}

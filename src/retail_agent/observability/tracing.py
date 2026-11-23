@@ -60,6 +60,9 @@ def setup_langsmith(
         return TracingStatus(
             enabled=False, warning="LANGSMITH_TRACING is on but LANGSMITH_API_KEY is empty."
         )
+    # The client logs its own connection failures (with a masked key) straight to the
+    # console; ours go to the event log and one line in the UI.
+    logging.getLogger("langsmith").setLevel(logging.CRITICAL)
     try:
         client = client_factory(
             api_key=settings.langsmith_api_key.get_secret_value(),
@@ -76,7 +79,6 @@ def setup_langsmith(
                 "local logs are still written."
             ),
         )
-    logging.getLogger("langsmith").setLevel(logging.CRITICAL)
     _client, _project = client, settings.langsmith_project
     log_event("langsmith_enabled", project=_project)
     return TracingStatus(enabled=True)

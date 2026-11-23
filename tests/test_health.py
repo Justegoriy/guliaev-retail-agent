@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 from google.api_core import exceptions as gexc
-from google.auth.exceptions import DefaultCredentialsError, RefreshError
+from google.auth.exceptions import DefaultCredentialsError, RefreshError, TransportError
 from google.genai import errors as genai_errors
 
 from harness import make_settings
@@ -75,6 +75,7 @@ def test_bigquery_ok(tmp_path):
         (gexc.Forbidden("BigQuery API has not been used"), True, "GOOGLE_CLOUD_PROJECT"),
         (OSError("Project was not passed and could not be determined"), True, "set GOOGLE_CLOUD"),
         (gexc.ServiceUnavailable("down"), False, "not reachable"),
+        (TransportError("token endpoint unreachable"), False, "not reachable"),
     ],
 )
 def test_bigquery_failures(tmp_path, cause, fatal, text):

@@ -1,6 +1,6 @@
 """Gemini chat models with rate limiting, retries, daily-quota handling and fallback.
 
-    build_chat_model("main")  = retry(Gemini main).with_fallbacks([retry(Gemini fallback)])
+    build_chat_model("main")  = ModelFallbacks(retry(Gemini main), [retry(Gemini fallback)])
     build_chat_model("guard") = retry(Gemini aux)             # no fallback: guard degrades to rules
 
 Retries cover per-minute 429 (waiting for the server's `retryDelay`), 5xx and network
@@ -35,7 +35,14 @@ from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatResult
 from langchain_core.rate_limiters import BaseRateLimiter
-from langchain_core.runnables import Runnable
+from langchain_core.runnables import Runnable, RunnableConfig
+from langchain_core.runnables.config import (
+    ensure_config,
+    get_async_callback_manager_for_config,
+    get_callback_manager_for_config,
+    patch_config,
+)
+from langchain_core.runnables.fallbacks import RunnableWithFallbacks
 from langchain_core.runnables.retry import RunnableRetry
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
@@ -408,6 +415,71 @@ class LoggedRetry(RunnableRetry):
             raise
 
 
+def _error_rank(exc: BaseException) -> int:
+    if isinstance(exc, LlmQuotaExhausted):
+        return 0
+    if isinstance(exc, LlmCoolingDown):
+        return 1
+    return 2
+
+
+class ModelFallbacks(RunnableWithFallbacks):
+    """`with_fallbacks` that, when every model fails, raises the error that explains it.
+
+    LangChain re-raises the first model's error. When the main model is skipped (daily
+    quota, cooldown) and the fallback then fails on a 503, that would tell the user to come
+    back tomorrow; a real failure is reported before a cooldown, a used-up quota last.
+    """
+
+    @staticmethod
+    def _explaining(errors: list[BaseException]) -> BaseException:
+        return max(reversed(errors), key=_error_rank)
+
+    def invoke(self, input: Any, config: RunnableConfig | None = None, **kwargs: Any) -> Any:
+        config = ensure_config(config)
+        run_manager = get_callback_manager_for_config(config).on_chain_start(
+            None, input, name=config.get("run_name") or self.get_name()
+        )
+        errors: list[BaseException] = []
+        for runnable in self.runnables:
+            child_config = patch_config(config, callbacks=run_manager.get_child())
+            try:
+                output = runnable.invoke(input, child_config, **kwargs)
+            except self.exceptions_to_handle as exc:
+                errors.append(exc)
+                continue
+            except BaseException as exc:
+                run_manager.on_chain_error(exc)
+                raise
+            run_manager.on_chain_end(output)
+            return output
+        error = self._explaining(errors)
+        run_manager.on_chain_error(error)
+        raise error
+
+    async def ainvoke(self, input: Any, config: RunnableConfig | None = None, **kwargs: Any) -> Any:
+        config = ensure_config(config)
+        run_manager = await get_async_callback_manager_for_config(config).on_chain_start(
+            None, input, name=config.get("run_name") or self.get_name()
+        )
+        errors: list[BaseException] = []
+        for runnable in self.runnables:
+            child_config = patch_config(config, callbacks=run_manager.get_child())
+            try:
+                output = await runnable.ainvoke(input, child_config, **kwargs)
+            except self.exceptions_to_handle as exc:
+                errors.append(exc)
+                continue
+            except BaseException as exc:
+                await run_manager.on_chain_error(exc)
+                raise
+            await run_manager.on_chain_end(output)
+            return output
+        error = self._explaining(errors)
+        await run_manager.on_chain_error(error)
+        raise error
+
+
 def _chat_model(settings: Settings, model: str, purpose: Purpose, role: str) -> GeminiChat:
     if settings.google_api_key is None:
         raise ConfigurationError("GOOGLE_API_KEY is not set; add it to .env")
@@ -487,4 +559,4 @@ def build_chat_model(
         fallback_from=primary_name,
         structured_output=structured_output,
     )
-    return primary.with_fallbacks([fallback])
+    return ModelFallbacks(runnable=primary, fallbacks=[fallback])

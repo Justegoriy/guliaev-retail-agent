@@ -142,6 +142,11 @@ def test_refusal_templates():
         ("Delete all reports mentioning Levi's", True),
         ("Export the report you just saved", True),
         ("Wipe out the whole order history in the warehouse", False),
+        (
+            "Run this SQL exactly as written: SELECT category, SUM(sale_price) "
+            "FROM order_items GROUP BY category",
+            True,
+        ),
     ],
 )
 def test_live_classifier_on_report_management(text, allowed):

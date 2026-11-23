@@ -11,7 +11,7 @@ from typing import Any
 
 from google import genai
 from google.api_core import exceptions as gexc
-from google.auth.exceptions import DefaultCredentialsError, GoogleAuthError
+from google.auth.exceptions import DefaultCredentialsError, GoogleAuthError, TransportError
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 
@@ -88,6 +88,10 @@ def check_bigquery(runner: BigQueryRunner, settings: Settings) -> Check:
         if isinstance(cause, DefaultCredentialsError):
             message = f"No Google Cloud credentials for BigQuery; {ADC_HINT}."
             return _log(Check("bigquery", False, message, fatal=True))
+        if isinstance(cause, TransportError):
+            # Could not reach Google's token endpoint: a network problem, not bad credentials.
+            message = f"BigQuery is not reachable right now ({type(cause).__name__})."
+            return _log(Check("bigquery", False, message))
         if isinstance(cause, GoogleAuthError | gexc.Unauthenticated):
             message = f"Google Cloud credentials are invalid or expired; {ADC_HINT}."
             return _log(Check("bigquery", False, message, fatal=True))

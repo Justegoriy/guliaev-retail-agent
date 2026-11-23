@@ -46,6 +46,19 @@ def test_execute_returns_result_with_job_config():
     assert config.labels == {"app": "retail_agent"}
 
 
+def test_api_calls_are_bounded_and_retried_only_by_the_runner():
+    """The client's own retry would keep a network outage going for 10 minutes."""
+    client = MagicMock()
+    client.query.return_value = make_job()
+    runner = make_runner(client, timeout_s=7)
+    runner.dry_run("SELECT 1")
+    runner.execute("SELECT 1")
+    for call in client.query.call_args_list:
+        assert call.kwargs["retry"] is None
+        assert call.kwargs["job_retry"] is None
+        assert call.kwargs["timeout"] == 7
+
+
 def test_retries_transient_errors_then_succeeds():
     client = MagicMock()
     client.query.side_effect = [gexc.ServiceUnavailable("down"), make_job()]
@@ -158,8 +171,11 @@ def test_get_table_metadata():
     field.name = "status"
     client = MagicMock()
     client.get_table.return_value = MagicMock(num_rows=10, schema=[field])
-    meta = make_runner(client).get_table_metadata("orders")
-    client.get_table.assert_called_once_with("bigquery-public-data.thelook_ecommerce.orders")
+    runner = make_runner(client)
+    meta = runner.get_table_metadata("orders")
+    client.get_table.assert_called_once_with(
+        "bigquery-public-data.thelook_ecommerce.orders", retry=None, timeout=runner.timeout_s
+    )
     assert meta == {
         "name": "orders",
         "num_rows": 10,

@@ -23,7 +23,7 @@ data/golden_candidates.jsonl
 data/schema_cache.json
 exports/
 logs/
-evals/results/
+evals/results/runs/
 
 # IDE
 .idea/

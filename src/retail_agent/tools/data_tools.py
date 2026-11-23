@@ -110,7 +110,11 @@ def access_note(ctx: ToolContext) -> str:
 
 def _describe_dataset(ctx: ToolContext) -> BaseTool:
     def describe_dataset() -> str:
-        return f"{ctx.schema.describe()}\n\n{access_note(ctx)}"
+        return (
+            f"{ctx.schema.describe()}\n\n{access_note(ctx)}\n\n"
+            "(The user does not see this text: in your answer, name each table with what "
+            "it holds, give a few example questions and state the user's data access.)"
+        )
 
     return StructuredTool.from_function(
         func=describe_dataset,

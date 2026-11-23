@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 
@@ -225,6 +226,34 @@ def test_both_models_out_of_daily_quota(settings, fake):
     with pytest.raises(LlmQuotaExhausted) as info:
         llm.build_chat_model("main", settings=settings).invoke(QUESTION)
     assert classify(info.value) is ErrorKind.QUOTA
+
+
+def test_failed_fallback_is_not_reported_as_the_main_models_daily_quota(settings, fake):
+    """Main model out of quota, fallback overloaded: "try again later", not "tomorrow"."""
+    settings = settings.model_copy(update={"llm_retry_budget_s": 0})
+    fake(main_m=[client_error(429, DAILY)], fb_m=[server_error(503)])
+    with pytest.raises(Exception) as info:
+        llm.build_chat_model("main", settings=settings).invoke(QUESTION)
+    assert classify(info.value) is ErrorKind.LLM_UNAVAILABLE
+
+
+def test_async_calls_choose_the_same_error(settings, fake, monkeypatch):
+    settings = settings.model_copy(update={"llm_retry_budget_s": 0})
+    fake(main_m=[client_error(429, DAILY)], fb_m=[ok("async ok"), server_error(503)])
+    monkeypatch.setattr(
+        genai_models.AsyncModels,
+        "generate_content",
+        lambda _self, **kwargs: _awaitable(genai_models.Models.generate_content(None, **kwargs)),
+    )
+    model = llm.build_chat_model("main", settings=settings)
+    assert asyncio.run(model.ainvoke(QUESTION)).text == "async ok"
+    with pytest.raises(Exception) as info:
+        asyncio.run(model.ainvoke(QUESTION))
+    assert classify(info.value) is ErrorKind.LLM_UNAVAILABLE
+
+
+async def _awaitable(value):
+    return value
 
 
 def test_guard_uses_aux_model_without_fallback(settings, fake):

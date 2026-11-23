@@ -13,6 +13,7 @@ from rich.status import Status
 from rich.table import Table
 
 from retail_agent import auth, errors, health
+from retail_agent.console import tolerate_unencodable_output
 from retail_agent.data.bigquery import BigQueryRunner
 from retail_agent.data.storage import Conversation, ConversationAccessError
 from retail_agent.graph.builder import (
@@ -444,6 +445,7 @@ def _start_session(user: auth.UserContext, settings: Settings) -> AgentSession |
 
 
 def main(argv: list[str] | None = None) -> int:
+    tolerate_unencodable_output()
     args = _parse_args(argv)
     settings = get_settings()
     logger.configure(settings.log_path, debug=args.debug)

@@ -48,5 +48,5 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
-markers = ["network: needs real BigQuery/Gemini access (deselect with -m 'not network')"]
+addopts = "-q -m 'not network'"
+markers = ["network: needs real BigQuery/Gemini access (skipped by default; run with -m network)"]

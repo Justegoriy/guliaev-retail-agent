@@ -1,0 +1,164 @@
+{
+  "started": "20261123-104019",
+  "commit": "34092e6",
+  "models": {
+    "main": "gemini-3.8-flash",
+    "fallback": "gemini-3.5-flash-lite",
+    "aux": "gemini-3.5-flash-lite",
+    "judge": "gemini-3.8-flash"
+  },
+  "filters": {
+    "only": [],
+    "case": [
+      "a1_available_data",
+      "a35_churn"
+    ]
+  },
+  "summary": {
+    "total": 2,
+    "passed": 1,
+    "by_category": {
+      "structure": {
+        "passed": 0,
+        "total": 1
+      },
+      "analytics": {
+        "passed": 1,
+        "total": 1
+      }
+    },
+    "judge_mean": 5.0,
+    "judge_unavailable": 0,
+    "models_used": {
+      "guard": {
+        "gemini-3.5-flash-lite": 3
+      },
+      "main": {
+        "gemini-3.5-flash-lite": 8
+      }
+    },
+    "accuracy_passed": 0,
+    "accuracy_total": 0,
+    "llm_calls": 11,
+    "input_tokens": 54132,
+    "output_tokens": 2283
+  },
+  "cases": [
+    {
+      "id": "a1_available_data",
+      "category": "structure",
+      "user": "ceo",
+      "passed": false,
+      "failures": [
+        "final: answer lacks 'orders'",
+        "final: answer lacks 'products'",
+        "final: answer lacks 'users'"
+      ],
+      "turns": [
+        {
+          "text": "What data is available to me?",
+          "answer": "Of course. Here is the overview of the data and analyses available to you.",
+          "status": "ok",
+          "blocked": false,
+          "trace_id": "4f8fa8aa349d4f3c",
+          "tools": [
+            "describe_dataset"
+          ],
+          "tool_results": [
+            [
+              "describe_dataset",
+              "I can analyse four tables of the online store:\n\n- **orders** (~124,780 rows) - One row per customer order.\n  Fields: order_id, user_id, status, gender, created_at, returned_at, shipped_at, delivered_at, num_of_item\n- **order_items** (~180,764 rows) - One row per item sold; the source of revenue.\n  Fields: id, order_id, user_id, product_id, inventory_item_id, status, created_at, shipped_at, delivered_at, returned_at, sale_price\n- **products** (~29,120 rows) - Product catalogue; `category` defines data access.\n  Fields: id, cost, category, name, brand, retail_price, department, sku, distribution_center_id\n- **users** (~100,000 rows) - Customers. Contains PII.\n  Fields: id, age, gender, state, city, country, traffic_source, created_at\n  Personal data (first_name, last_name, email, street_address, postal_code, latitude, longitude, user_geom) is never shown.\n\nExamples of what you can ask about:\n- Revenue, orders and average order value by period, category, brand or department\n- Top products and brands, margins (sale price vs cost)\n- Return and cancellation rates\n- Customer segments by age, gender, country and acquisition channel\n- Repeat customers, cohorts by sign-up month, delivery times\n\nYour data access: all product categories."
+            ]
+          ],
+          "sql": [],
+          "confirmation": false,
+          "error": null,
+          "latency_ms": 89603
+        }
+      ],
+      "accuracy": null,
+      "judge": {
+        "intent": 5,
+        "grounded": 5,
+        "format": 5,
+        "action_items": null,
+        "overall": 5,
+        "reasoning": "The assistant accurately described all four tables and potential analyses based on the evidence, without using SQL or including action items as instructed."
+      },
+      "llm_calls": 3,
+      "input_tokens": 11169,
+      "output_tokens": 63,
+      "latency_ms": 90703,
+      "error": null
+    },
+    {
+      "id": "a35_churn",
+      "category": "analytics",
+      "user": "ceo",
+      "passed": true,
+      "failures": [],
+      "turns": [
+        {
+          "text": "Почему в прошлом месяце вырос churn?",
+          "answer": "Contrary to the premise, customer churn did **not** increase last month; it actually **decreased** from 92.2% in September to 90.3% in October 2026. \n\n### Key Metrics\n* **Period:** October 2026 (comparing customers active in September 2026 who did or did not purchase in October 2026).\n* **Definition:** Churn rate is the share of customers active in month $M-1$ who had no sold items in month $M$.\n* **Active Previous Month (September 2026):** 3,410 customers.\n* **Churned Customers (October 2026):** 3,080 customers.\n* **Churn Rate:** 90.3% (down from 92.2% in September 2026 and 92.7% in August 2026).\n\n### Decomposition & Findings\n1. **Customer Type:** New customers acquired in September had a lower churn rate (89.5%) entering October compared to existing customers (91.7%).\n2. **Acquisition Channel:** Churn remained uniform across major channels (Search at 90.5%, Organic at 90.4%), with Facebook showing slightly lower churn (87.2%).\n3. **Product Categories:** Last-purchase categories showed consistent churn rates near 89–90% (e.g., Intimates at 89.1%, Jeans at 89.4%), improving slightly from August/September cohorts.\n\n### Action Items\n* **Re-engagement:** Capitalize on the lower churn among new cohorts by launching targeted lifecycle email campaigns within 30 days of their first purchase.\n* **Channel Focus:** Investigate successful retention tactics from Facebook traffic to apply across Search and Organic channels.",
+          "status": "ok",
+          "blocked": false,
+          "trace_id": "3df94d23ddfc4bd0",
+          "tools": [
+            "run_sql",
+            "run_sql",
+            "run_sql",
+            "run_sql",
+            "run_sql"
+          ],
+          "tool_results": [
+            [
+              "run_sql",
+              "OK: rows=4, showing first 4\n\nmonth,active_previous_month,churned,churn_rate\n2026-07,2738,2572,0.9394\n2026-08,3054,2830,0.9267\n2026-09,3325,3067,0.9224\n2026-10,3410,3080,0.9032"
+            ],
+            [
+              "run_sql",
+              "OK: rows=5, showing first 5\n\nmonth,traffic_source,active_previous_month,churn_rate\n2026-10,Search,2397,0.9049\n2026-10,Organic,479,0.904\n2026-10,Facebook,211,0.872\n2026-10,Email,191,0.8901\n2026-10,Display,132,0.9394"
+            ],
+            [
+              "run_sql",
+              "OK: rows=2, showing first 2\n\nmonth,customer_type,active_previous_month,churn_rate\n2026-10,existing,1341,0.9165\n2026-10,new,2069,0.8946"
+            ],
+            [
+              "run_sql",
+              "OK: rows=5, showing first 5\n\ncategory,active_september,retained_october,churn_rate\nIntimates,358,39,0.8911\nJeans,339,36,0.8938\nTops & Tees,320,33,0.8969\nSleep & Lounge,318,32,0.8994\nSweaters,307,35,0.886"
+            ],
+            [
+              "run_sql",
+              "OK: rows=5, showing first 5\n\ncategory,active_august,retained_september,churn_rate\nJeans,347,21,0.9395\nIntimates,334,23,0.9311\nFashion Hoodies & Sweatshirts,313,35,0.8882\nTops & Tees,304,19,0.9375\nSweaters,302,27,0.9106"
+            ]
+          ],
+          "sql": [
+            "WITH active AS (\n  SELECT DISTINCT user_id, DATE_TRUNC(DATE(created_at), MONTH) AS month\n  FROM `bigquery-public-data.thelook_ecommerce.order_items`\n  WHERE status NOT IN ('Cancelled', 'Returned')\n),\ntransitions AS (\n  SELECT a.month AS prev_month, a.user_id, b.user_id IS NOT NULL AS retained\n  FROM active a\n  LEFT JOIN active b\n    ON b.user_id = a.user_id AND b.month = DATE_ADD(a.month, INTERVAL 1 MONTH)\n)\nSELECT\n  FORMAT_DATE('%Y-%m', DATE_ADD(prev_month, INTERVAL 1 MONTH)) AS month,\n  COUNT(*) AS active_previous_month,\n  COUNTIF(NOT retained) AS churned,\n  ROUND(SAFE_DIVIDE(COUNTIF(NOT retained), COUNT(*)), 4) AS churn_rate\nFROM transitions\nWHERE prev_month BETWEEN DATE '2026-06-01' AND DATE '2026-09-01'\nGROUP BY month\nORDER BY month",
+            "WITH active AS (\n  SELECT DISTINCT oi.user_id, DATE_TRUNC(DATE(oi.created_at), MONTH) AS month\n  FROM `bigquery-public-data.thelook_ecommerce.order_items` oi\n  WHERE oi.status NOT IN ('Cancelled', 'Returned')\n),\ntransitions AS (\n  SELECT a.month AS prev_month, a.user_id, b.user_id IS NOT NULL AS retained\n  FROM active a\n  LEFT JOIN active b ON b.user_id = a.user_id AND b.month = DATE_ADD(a.month, INTERVAL 1 MONTH)\n)\nSELECT\n  FORMAT_DATE('%Y-%m', DATE_ADD(t.prev_month, INTERVAL 1 MONTH)) AS month,\n  u.traffic_source,\n  COUNT(*) AS active_previous_month,\n  ROUND(SAFE_DIVIDE(COUNTIF(NOT t.retained), COUNT(*)), 4) AS churn_rate\nFROM transitions t\nJOIN `bigquery-public-data.thelook_ecommerce.users` u ON u.id = t.user_id\nWHERE t.prev_month = DATE '2026-09-01'\nGROUP BY month, u.traffic_source\nORDER BY active_previous_month DESC",
+            "WITH active AS (\n  SELECT DISTINCT oi.user_id, DATE_TRUNC(DATE(oi.created_at), MONTH) AS month\n  FROM `bigquery-public-data.thelook_ecommerce.order_items` oi\n  WHERE oi.status NOT IN ('Cancelled', 'Returned')\n),\nfirst_month AS (\n  SELECT user_id, MIN(month) AS first_month FROM active GROUP BY user_id\n),\ntransitions AS (\n  SELECT a.month AS prev_month, a.user_id, b.user_id IS NOT NULL AS retained\n  FROM active a\n  LEFT JOIN active b ON b.user_id = a.user_id AND b.month = DATE_ADD(a.month, INTERVAL 1 MONTH)\n)\nSELECT\n  FORMAT_DATE('%Y-%m', DATE_ADD(t.prev_month, INTERVAL 1 MONTH)) AS month,\n  IF(f.first_month = t.prev_month, 'new', 'existing') AS customer_type,\n  COUNT(*) AS active_previous_month,\n  ROUND(SAFE_DIVIDE(COUNTIF(NOT t.retained), COUNT(*)), 4) AS churn_rate\nFROM transitions t\nJOIN first_month f USING (user_id)\nWHERE t.prev_month = DATE '2026-09-01'\nGROUP BY month, customer_type\nORDER BY customer_type",
+            "WITH active_per_category AS (\n  SELECT DISTINCT oi.user_id, p.category, DATE_TRUNC(DATE(oi.created_at), MONTH) AS month\n  FROM `bigquery-public-data.thelook_ecommerce.order_items` oi\n  JOIN `bigquery-public-data.thelook_ecommerce.products` p ON oi.product_id = p.id\n  WHERE oi.status NOT IN ('Cancelled', 'Returned')\n),\nuser_last_category_sept AS (\n  -- find category purchased in September 2026\n  SELECT user_id, category\n  FROM active_per_category\n  WHERE month = DATE '2026-09-01'\n),\nactive_oct AS (\n  SELECT DISTINCT user_id\n  FROM active_per_category\n  WHERE month = DATE '2026-10-01'\n)\nSELECT\n  ul.category,\n  COUNT(DISTINCT ul.user_id) AS active_september,\n  COUNT(DISTINCT a.user_id) AS retained_october,\n  ROUND(1 - SAFE_DIVIDE(COUNT(DISTINCT a.user_id), COUNT(DISTINCT ul.user_id)), 4) AS churn_rate\nFROM user_last_category_sept ul\nLEFT JOIN active_oct a ON ul.user_id = a.user_id\nGROUP BY ul.category\nORDER BY active_september DESC\nLIMIT 5",
+            "WITH active_per_category AS (\n  SELECT DISTINCT oi.user_id, p.category, DATE_TRUNC(DATE(oi.created_at), MONTH) AS month\n  FROM `bigquery-public-data.thelook_ecommerce.order_items` oi\n  JOIN `bigquery-public-data.thelook_ecommerce.products` p ON oi.product_id = p.id\n  WHERE oi.status NOT IN ('Cancelled', 'Returned')\n),\nuser_last_category_aug AS (\n  SELECT user_id, category\n  FROM active_per_category\n  WHERE month = DATE '2026-08-01'\n),\nactive_sept AS (\n  SELECT DISTINCT user_id\n  FROM active_per_category\n  WHERE month = DATE '2026-09-01'\n)\nSELECT\n  ul.category,\n  COUNT(DISTINCT ul.user_id) AS active_august,\n  COUNT(DISTINCT a.user_id) AS retained_september,\n  ROUND(1 - SAFE_DIVIDE(COUNT(DISTINCT a.user_id), COUNT(DISTINCT ul.user_id)), 4) AS churn_rate\nFROM user_last_category_aug ul\nLEFT JOIN active_sept a ON ul.user_id = a.user_id\nGROUP BY ul.category\nORDER BY active_august DESC\nLIMIT 5"
+          ],
+          "confirmation": false,
+          "error": null,
+          "latency_ms": 55975
+        }
+      ],
+      "accuracy": null,
+      "judge": {
+        "intent": 5,
+        "grounded": 5,
+        "format": 5,
+        "action_items": 4,
+        "overall": 5,
+        "reasoning": "The assistant correctly corrected the user's premise by showing that churn actually decreased, provided clear definitions, and backed up all drivers with specific SQL query results. The layout is clean and professional."
+      },
+      "llm_calls": 8,
+      "input_tokens": 42963,
+      "output_tokens": 2220,
+      "latency_ms": 57106,
+      "error": null
+    }
+  ]
+}
