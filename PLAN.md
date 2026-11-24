@@ -163,7 +163,7 @@ class QueryResult:                      # bigquery
 - [x] Проверить `python --version` (нужен ≥ 3.11) и создать `.venv`. → Python 3.13.9, `.venv` создан.
 - [x] `git init`, `.gitignore` (`.venv`, `.env`, `data/app.db`, `data/checkpoints.db`, `data/golden_index.npz`, `data/golden_candidates.jsonl`, `data/schema_cache.json`, `exports/`, `logs/`, `__pycache__`, `.idea`).
 - [x] Удалить шаблонный `main.py`. `bq_client.py` переедет в `src/retail_agent/data/bigquery.py` на шаге 2.
-- [x] Доступы: ключ AI Studio в `.env`, GCP-проект `gen-lang-client-0777214415`, ADC + quota project настроены, BigQuery из Python работает. LangSmith — опционально, позже.
+- [x] Доступы: ключ AI Studio в `.env`, свой GCP-проект, ADC + quota project настроены, BigQuery из Python работает. LangSmith — опционально, позже.
 - [x] Проверить актуальные версии пакетов и модели Gemini, записать в `.env.example`. → модели по странице pricing Gemini API (D18); список моделей через API проверить, когда будет ключ. Версии пакетов на 18.11.2026: langgraph 1.2.22, langgraph-checkpoint-sqlite 3.1.3, langchain-core 1.8.2, langchain-google-genai 4.5.0, langsmith 0.15.0, google-cloud-bigquery 3.47.0, db-dtypes 1.9.0, pandas 3.1.1, sqlglot 30.33.0, pydantic-settings 2.16.3, pyyaml 6.0.3, rich 15.0.0, prompt_toolkit 3.0.53, tenacity 9.2.1, numpy 2.5.5, pytest 9.2.0, ruff 0.17.5.
 
 **Готово, когда:** venv создан, git инициализирован, известны имена моделей.
