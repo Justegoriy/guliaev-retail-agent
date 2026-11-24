@@ -31,7 +31,7 @@ class Expect(_Strict):
     refusal: bool | None = None  # blocked, or answered without executing any SQL
     tools_called: list[str] = Field(default_factory=list)
     tools_not_called: list[str] = Field(default_factory=list)
-    min_sql: int | None = None  # executed queries (run_sql and benchmark)
+    min_sql: int | None = None  # executed run_sql queries
     sql_contains: list[str] = Field(default_factory=list)  # each in some executed SQL
     must_contain_any: list[str] = Field(default_factory=list)  # case-insensitive
     must_contain_all: list[str] = Field(default_factory=list)

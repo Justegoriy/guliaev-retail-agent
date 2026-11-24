@@ -1,11 +1,9 @@
 import json
-from datetime import date
 from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
 from langchain_core.tools import StructuredTool
-from pydantic import ValidationError
 
 from retail_agent.auth import UserContext
 from retail_agent.data.bigquery import QueryResult
@@ -15,7 +13,7 @@ from retail_agent.observability import logger
 from retail_agent.observability.callbacks import ObservabilityCallbackHandler
 from retail_agent.settings import Settings
 from retail_agent.tools import REGISTRY, ToolContext, ToolRegistry, ToolSpec, build_tools
-from retail_agent.tools.data_tools import STOP_MESSAGE, benchmark_sql
+from retail_agent.tools.data_tools import STOP_MESSAGE
 
 DATASET = "bigquery-public-data.thelook_ecommerce"
 CEO = UserContext("ceo", "Alice", "ceo")
@@ -225,69 +223,7 @@ def test_describe_dataset_hides_pii_and_shows_access():
     assert "all brands" in full
     restricted = tools_by_name(make_ctx(user=JEANS))["describe_dataset"].invoke({})
     assert "brands Diesel" in restricted
-    assert "company-wide totals" in restricted
-
-
-# -- get_company_benchmark ---------------------------------------------------------------
-
-
-def benchmark(ctx: ToolContext, **args) -> str:
-    args = {"metric": "revenue", "start_date": "2024-01-01", "end_date": "2024-12-31", **args}
-    return tools_by_name(ctx)["get_company_benchmark"].invoke(args)
-
-
-def test_benchmark_total_ignores_acl():
-    ctx = make_ctx(user=JEANS, df=pd.DataFrame({"revenue": [1234567.891], "orders": [10]}))
-    out = benchmark(ctx)
-    assert out.startswith("OK: company-wide revenue (all brands, anonymized totals)")
-    assert "2024-01-01..2024-12-31" in out
-    assert "Definition: SUM(order_items.sale_price)" in out
-    assert out.endswith("revenue=1234567.89")
-    sql = ctx.runner.execute.call_args.args[0]
-    assert "category" not in sql
-    assert "DATE '2024-01-01' AND DATE '2024-12-31'" in sql
-    assert ctx.turn.executed[0].purpose == "company benchmark: revenue"
-
-
-def test_benchmark_monthly_returns_only_requested_metric():
-    df = pd.DataFrame({"month": ["2024-01", "2024-02"], "revenue": [1.0, 2.0], "orders": [3, 4]})
-    out = benchmark(make_ctx(df=df), metric="orders", granularity="month")
-    assert out.endswith("month,orders\n2024-01,3\n2024-02,4")
-    assert "revenue" not in out.split("\n\n")[-1]
-
-
-def test_benchmark_without_orders():
-    out = benchmark(make_ctx(df=pd.DataFrame({"revenue": [None]})))
-    assert out.endswith("No orders in this period.")
-
-
-def test_benchmark_service_down():
-    ctx = make_ctx()
-    ctx.runner.dry_run.side_effect = ServiceUnavailable("bigquery")
-    assert benchmark(ctx) == "ERROR(service): BigQuery unavailable, do not retry."
-
-
-@pytest.mark.parametrize(
-    "args",
-    [
-        {"start_date": "2024-02-01", "end_date": "2024-01-01"},
-        {"metric": "revenue_by_category"},
-        {"start_date": "2010-01-01", "end_date": "2024-01-01"},
-        {"granularity": "week"},
-        {"end_date": "2024-01-01; DROP TABLE x"},
-    ],
-)
-def test_benchmark_rejects_invalid_arguments(args):
-    ctx = make_ctx()
-    with pytest.raises(ValidationError):
-        benchmark(ctx, **args)
-    ctx.runner.execute.assert_not_called()
-
-
-def test_benchmark_sql_month_grouping():
-    sql = benchmark_sql(DATASET, date(2024, 1, 1), date(2024, 3, 31), "month")
-    assert "FORMAT_DATE('%Y-%m', DATE(created_at)) AS month" in sql
-    assert sql.endswith("GROUP BY month\nORDER BY month")
+    assert "company-wide figures are not available" in restricted
 
 
 # -- registry ----------------------------------------------------------------------------
@@ -303,7 +239,8 @@ def dummy_factory(name):
 def test_data_tools_available_to_every_role():
     for user in (CEO, JEANS):
         names = {s.name for s in REGISTRY.specs_for(user)}
-        assert {"describe_dataset", "run_sql", "get_company_benchmark"} <= names
+        assert {"describe_dataset", "run_sql"} <= names
+        assert "get_company_benchmark" not in names
 
 
 def test_registry_filters_by_role_and_sets_flags():
@@ -356,19 +293,3 @@ def test_tool_call_log_carries_registry_flags(tmp_path):
 
 
 # -- BigQuery ----------------------------------------------------------------------------
-
-
-@pytest.mark.network
-@pytest.mark.parametrize("granularity", ["total", "month"])
-def test_benchmark_sql_runs_on_bigquery(granularity):
-    from retail_agent.data.bigquery import BigQueryRunner
-    from retail_agent.settings import get_settings
-
-    runner = BigQueryRunner.from_settings(get_settings())
-    sql = benchmark_sql(DATASET, date(2024, 1, 1), date(2024, 3, 31), granularity)
-    df = runner.execute(sql).df
-    assert len(df) == (3 if granularity == "month" else 1)
-    row = df.iloc[0]
-    assert row["revenue"] > 0 and row["orders"] > 0
-    assert row["avg_order_value"] == pytest.approx(row["revenue"] / row["orders"])
-    assert 0 < row["return_rate"] < 1

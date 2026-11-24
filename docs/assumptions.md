@@ -9,7 +9,7 @@ comments and the other documents.
 | # | Assumption |
 |---|---|
 | D1 | **Access by brand** (confirmed by OpsFleet). Brand is the only access dimension: a `manager` manages one or more brands and analyses only those (exact `products.brand` values); the mapping is the access table [config/users.yaml](../config/users.yaml). The rewrite applies to every table, so orders, items and customers are those of the user's brands |
-| D2 | **Outside their scope, users get only anonymised company-wide totals**: revenue, orders, AOV, customers, items sold, return rate, total or monthly, with no breakdown by other categories, products, brands or customers (tool `get_company_benchmark` with fixed SQL). So "my categories vs the company" is possible |
+| D2 | **Outside their brands, managers see nothing** (confirmed by OpsFleet): no other brands and no company-wide totals, shares or averages; only the `ceo` sees company-wide data. A question that goes beyond the user's brands is answered from what they can see, and the agent says which part is outside their access. Totals of a manager's queries are labelled as their brands' totals |
 | D3 | Only the `ceo` has access to all brands and company-wide data |
 | D4 | Users are defined in `config/users.yaml` and chosen with `--user` (or from a list, or in the web sidebar). No password: authentication is simulated. Demo users: `ceo`, `denim_manager` (Levi's, Diesel, 7 For All Mankind, True Religion), `outdoor_manager` (The North Face, Columbia, Carhartt) |
 | - | A brand manager sees the items of their brands, their revenue, and the orders they were part of. A mixed order counts as one order but only with its allowed items and revenue (`num_of_item` is recounted) |

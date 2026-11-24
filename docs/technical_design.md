@@ -87,7 +87,7 @@ START -> input_guard --(blocked)--> output_guard -> END
    interrupted for confirmation, only that call is re-run on resume (parallel queries are not
    executed twice, a report is not saved twice).
 5. **Tools** ([tools/](../src/retail_agent/tools/)): `describe_dataset`, `run_sql`,
-   `get_company_benchmark`, `save_report`, `list_reports`, `search_reports`, `get_report`,
+   `save_report`, `list_reports`, `search_reports`, `get_report`,
    `request_report_deletion`, `export_report`, `update_user_preference`, `forget_user_preference`.
    Tools are built per session from a `ToolContext` (user, conversation, services) captured in a
    closure: the model cannot pass a different user through arguments.
@@ -207,10 +207,12 @@ has full access (D1 to D3).
   (about 30% of orders mix brands; without the recount other brands' item counts would leak); `users` only customers who bought allowed products. Whatever SQL the model writes, it can
   only see the user's rows. Rejecting queries "without the right WHERE" was rejected as a design:
   the model would fail often, adding retries and cost.
-- Outside their scope users get only anonymised company-wide totals through
-  `get_company_benchmark` (fixed SQL templates, the model writes no SQL; revenue, orders, AOV,
-  customers, items sold, return rate; total or monthly; no breakdown by category, product, brand
-  or customer). So "my brands vs the company" works, a breakdown of other brands does not.
+- Outside their brands managers see nothing, company-wide totals included (D2); only the CEO
+  sees company-wide data. Since every table already holds only the user's brands, there is no
+  separate tool that could leak: the core prompt makes the agent label totals as "your brands'",
+  answer the visible part of a wider question ("our share of company revenue") and name the gap.
+  An earlier version offered anonymised company totals through a fixed-SQL tool; it was removed
+  when OpsFleet confirmed that managers must not see them.
 - Verified on BigQuery: each demo manager sees exactly their brands (this also catches a
   misspelt brand in the config, which would match nothing); for `denim_manager`, `orders` and
   `order_items` give the same 4,960 orders and 5,019 items.
@@ -338,7 +340,7 @@ idempotent handlers.
   flow (including "yes" in the chat not confirming and a changed set being refused), history and
   summarization, preferences, retries and fallbacks, CLI, web app. 21 network tests run against
   real Gemini and BigQuery on demand (`pytest -m network`).
-- *Offline eval* ([evals/](../evals/)): 26 cases in 8 categories (structure, analytics, report,
+- *Offline eval* ([evals/](../evals/)): 27 cases in 8 categories (structure, analytics, report,
   security, resilience, personalization, multi-turn, deletion). Each case can set the user, a
   pre-filled profile, saved reports and several turns. Three layers:
   1. deterministic checks: refusal, tools called or not called, SQL executed and its content,
@@ -352,7 +354,7 @@ idempotent handlers.
   Each run uses its own databases and log, writes `evals/results/<timestamp>.json` with commit,
   models, tokens and per-category results, and supports `--only <category>` and `--case <id>`.
 - *Security red team* is part of the eval: PII extraction, prompt injection, off-topic, `DROP` and
-  `DELETE`, another brand's data, ACL through a follow-up, PII through a preference. The bar is
+  `DELETE`, another brand's data, company-wide data for a manager, ACL through a follow-up, PII through a preference. The bar is
   100%.
 - *Gate*: CI runs lint and unit tests on every push; in production the eval (security 100%, no
   regression in pass rate, judge mean or accuracy against the last release) gates the deploy,
@@ -451,7 +453,7 @@ trace sampling for weekly manual review.
 | Empty result (typo in a state name) | `EMPTY` with advice; the model checks distinct values and fixes the filter | The answer, or "no data for X; available values are ..." |
 | Query too expensive | Refused at dry run (2 GB per query, 10 GB per turn); the model narrows or aggregates | The answer, or an explanation |
 | PII requested | Guard flag + SQL Guard rejection + masking | Customers by id; "personal data is not available" |
-| Other brand's data | ACL rewrite returns only allowed rows; benchmark for company totals | Totals for the company, no breakdown |
+| Other brand's or company-wide data | ACL rewrite returns only allowed rows | The visible part of the answer and a note on what is outside the user's access |
 | Per-minute 429 / 5xx from Gemini | Retries within 30 s, then fallback model | A normal answer, a bit slower |
 | Daily quota on the main model | No retries, fallback at once, main model marked exhausted | A normal answer |
 | Main model overloaded repeatedly | 5-minute cooldown, fallback answers directly | A normal answer |

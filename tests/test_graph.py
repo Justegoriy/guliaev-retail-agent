@@ -1,13 +1,11 @@
 import os
 
-import pandas as pd
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.errors import GraphRecursionError
 
 from harness import DATASET, REVENUE_SQL, Harness, sql_call
 from retail_agent.auth import UserContext
-from retail_agent.data.bigquery import QueryResult
 from retail_agent.graph import memory
 from retail_agent.graph.memory import ContextExtraction, HistorySummary
 from retail_agent.safety.input_guard import GuardVerdict
@@ -99,13 +97,13 @@ def test_invalid_tool_arguments_come_back_as_error_result(h):
         content="",
         tool_calls=[
             {
-                "name": "get_company_benchmark",
-                "args": {"metric": "revenue", "start_date": "2024-02-01", "end_date": "2024-01-01"},
+                "name": "run_sql",
+                "args": {"sql": "SELECT 1"},  # `purpose` is missing
                 "id": "b1",
             }
         ],
     )
-    h.turn("company revenue", bad, AIMessage("Fixed."))
+    h.turn("revenue", bad, AIMessage("Fixed."))
     result = next(m for m in h.messages if isinstance(m, ToolMessage))
     assert result.text.startswith("ERROR(invalid_args)")
 
@@ -194,28 +192,6 @@ def test_context_extraction_failure_keeps_sql_and_summary(h):
     assert context["result_summary"]
 
 
-def test_benchmark_does_not_become_analysis_context(h):
-    call = AIMessage(
-        content="",
-        tool_calls=[
-            {
-                "name": "get_company_benchmark",
-                "args": {"metric": "revenue", "start_date": "2024-01-01", "end_date": "2024-12-31"},
-                "id": "b1",
-            }
-        ],
-    )
-    h.runner.execute.return_value = QueryResult(
-        df=pd.DataFrame({"revenue": [5.0]}),
-        sql="",
-        bytes_processed=1,
-        duration_ms=1,
-        cache_hit=False,
-    )
-    h.turn("company revenue 2024", call, AIMessage("Company: $5."))
-    assert h.session.state().get("analysis_context") is None
-
-
 def test_summarization_folds_old_turns(h):
     for i in range(4):
         h.turn(f"question {i}", AIMessage(f"answer {i}"))
@@ -282,7 +258,8 @@ def test_restricted_user_prompt_lists_brands(tmp_path):
     h = Harness(tmp_path, user=diesel)
     h.turn("hello", AIMessage("Hi!"))
     assert "brands Diesel, Levi's (products.brand)" in h.model.system_prompt()
-    assert "get_company_benchmark" in h.model.system_prompt()
+    assert "company-wide figures are not available" in h.model.system_prompt()
+    assert "get_company_benchmark" not in h.model.system_prompt()
 
 
 # -- prepare_history -------------------------------------------------------------------------

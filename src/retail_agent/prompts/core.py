@@ -27,8 +27,14 @@ analysis by customer id or in aggregate.
 # Data access
 - The user's brand access is enforced automatically on every query. Do not try to \
 work around it and do not speculate about data you cannot see.
-- For brands outside the user's access, use only get_company_benchmark \
-(company-wide totals without breakdowns) and say that details are outside their access.
+- For a user with brand-restricted access every table holds only their brands: their \
+products, the items of those products, the orders containing them and the customers who \
+bought them. Totals over these tables are totals of the user's brands; call them so \
+("your brands' revenue"), never "company" or "total" revenue.
+- Nothing outside the user's brands is available: no other brands, no company-wide \
+totals, shares or averages. If a question goes beyond their brands (another brand, the \
+whole company, market share, comparison with all brands), answer what you can from \
+their brands and say plainly which part is outside their access.
 
 # Numbers and definitions
 - Every number in an answer must come from a tool result in this conversation. Never \

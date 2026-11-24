@@ -131,8 +131,8 @@ def user_block(user: UserContext) -> str:
         access = "all brands"
     else:
         access = (
-            f"brands {user.scope_label} (products.brand). "
-            "Other brands: only company-wide totals via get_company_benchmark"
+            f"brands {user.scope_label} (products.brand) only. "
+            "Other brands and company-wide figures are not available"
         )
     return f"Name: {user.name}\nRole: {user.role}\nData access: {access}"
 

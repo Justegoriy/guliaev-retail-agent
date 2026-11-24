@@ -151,8 +151,7 @@ rules. Ask me a question about sales, products or customers.
 trace: 99a006c87b334fce
 ```
 
-A brand manager asking about their brands, then about a brand outside their access
-(`--user denim_manager`):
+A brand manager asking about their brands (`--user denim_manager`):
 
 ```text
 │ Carlos Ruiz (denim_manager), role: manager                                  │
@@ -172,13 +171,6 @@ Religion at USD 21,409.
 
 Total revenue across your four accessible brands in 2024 was USD 74,783.
 trace: 909b9998000d4c54
-you> Revenue of Nike products in 2024
-Nike is outside your brand access (your accessible brands are Diesel, True
-Religion, 7 For All Mankind, and Levi's), so detailed product-level figures for
-Nike are not available.
-
-Company-wide total revenue across all brands in 2024 was USD 1,187,556.
-trace: 0be2e0518c414616
 ```
 
 Deleting a report: the agent saved "Q1 2025 Sales Review and Q2 Action Plan"; on "Delete the report
@@ -217,8 +209,9 @@ authentication.
 | `outdoor_manager` (Diana Novak) | manager | The North Face, Columbia, Carhartt |
 
 Brand is the only access dimension: a manager analyses only their brands (exact
-`products.brand` values). Outside their brands, managers get only company-wide totals without
-any breakdown.
+`products.brand` values). Outside their brands they see nothing, company-wide totals included:
+the agent answers from their brands and says what is outside their access. Only the CEO sees
+company-wide data.
 
 ## CLI commands
 
@@ -319,7 +312,7 @@ on every push.
 **Eval** against the real agent (Gemini + BigQuery):
 
 ```bash
-python evals/run_eval.py                        # all 26 cases
+python evals/run_eval.py                        # all 27 cases
 python evals/run_eval.py --only security        # one or more categories
 python evals/run_eval.py --case a2_top_categories --no-judge
 ```

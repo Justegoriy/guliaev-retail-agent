@@ -67,7 +67,7 @@ StageCallback = Callable[[str], None]
 STAGE_START = "Checking request..."
 CANCELLED_TEXT = "(The user cancelled this request before it finished.)"
 CANCELLED_TOOL_TEXT = "Cancelled by the user."
-DATA_TOOLS = frozenset({"run_sql", "get_company_benchmark", "describe_dataset"})
+DATA_TOOLS = frozenset({"run_sql", "describe_dataset"})
 
 
 def stage_after(node: str, update: Any) -> str | None:

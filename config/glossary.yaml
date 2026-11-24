@@ -1,7 +1,6 @@
 # Business metric definitions (D24). They go into the system prompt; the agent uses them
 # for ambiguous terms and states the definition it used in the answer.
-# "sold item" = order_items.status NOT IN ('Cancelled', 'Returned') - the same definition
-# as in get_company_benchmark, so the user's numbers and company benchmarks are comparable.
+# "sold item" = order_items.status NOT IN ('Cancelled', 'Returned').
 
 terms:
   revenue:
