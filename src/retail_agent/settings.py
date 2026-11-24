@@ -40,7 +40,8 @@ class Settings(BaseSettings):
 
     # Agent behaviour
     max_sql_failures: int = Field(3, ge=1)
-    max_agent_steps: int = Field(15, ge=1)
+    max_agent_steps: int = Field(5, ge=1)  # graph recursion guard; the budget is below
+    max_llm_calls_per_turn: int = Field(5, ge=2)  # guard + agent + post-turn calls
     result_rows_to_llm: int = Field(50, ge=1)
     sql_default_limit: int = Field(1000, ge=1)
     input_guard_llm: bool = True

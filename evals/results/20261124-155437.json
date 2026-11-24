@@ -1,0 +1,131 @@
+{
+  "started": "20261124-155437",
+  "commit": "f6dbc89",
+  "models": {
+    "main": "gemini-3.8-flash",
+    "fallback": "gemini-3.5-flash-lite",
+    "aux": "gemini-3.5-flash-lite",
+    "judge": "gemini-3.8-flash"
+  },
+  "filters": {
+    "only": [],
+    "case": [
+      "a10_quarterly_report",
+      "a3_state_underspending",
+      "a35_churn"
+    ]
+  },
+  "summary": {
+    "total": 2,
+    "passed": 0,
+    "by_category": {
+      "analytics": {
+        "passed": 0,
+        "total": 1
+      },
+      "report": {
+        "passed": 0,
+        "total": 1
+      }
+    },
+    "judge_mean": 1.0,
+    "judge_unavailable": 0,
+    "models_used": {
+      "guard": {
+        "gemini-3.5-flash-lite": 2
+      }
+    },
+    "accuracy_passed": 0,
+    "accuracy_total": 0,
+    "llm_calls": 2,
+    "input_tokens": 808,
+    "output_tokens": 74
+  },
+  "cases": [
+    {
+      "id": "a35_churn",
+      "category": "analytics",
+      "user": "ceo",
+      "passed": false,
+      "failures": [
+        "turn 1: turn failed: llm_unavailable",
+        "final: turn failed: llm_unavailable",
+        "final: tools not called: ['run_sql'] (called: [])",
+        "final: answer has none of ['churn', 'отток']",
+        "judge: overall 1/5"
+      ],
+      "turns": [
+        {
+          "text": "Почему в прошлом месяце вырос churn?",
+          "answer": "The language model is temporarily unavailable. Please try again in a minute. (Reference: 3a4a877d74df4eaf)",
+          "status": "error",
+          "blocked": false,
+          "trace_id": "3a4a877d74df4eaf",
+          "tools": [],
+          "tool_results": [],
+          "sql": [],
+          "confirmation": false,
+          "error": "llm_unavailable",
+          "latency_ms": 62407
+        }
+      ],
+      "accuracy": null,
+      "judge": {
+        "intent": 1,
+        "grounded": 5,
+        "format": 3,
+        "action_items": null,
+        "overall": 1,
+        "reasoning": "The assistant failed to answer the user's question due to a service error and provided no data or analysis."
+      },
+      "llm_calls": 1,
+      "input_tokens": 399,
+      "output_tokens": 39,
+      "latency_ms": 75888,
+      "error": null
+    },
+    {
+      "id": "a10_quarterly_report",
+      "category": "report",
+      "user": "ceo",
+      "passed": false,
+      "failures": [
+        "turn 1: turn failed: llm_unavailable",
+        "final: turn failed: llm_unavailable",
+        "final: tools not called: ['run_sql'] (called: [])",
+        "final: answer has none of ['action']",
+        "judge: overall 1/5",
+        "judge: action items None/5"
+      ],
+      "turns": [
+        {
+          "text": "Make a Q1 2025 report with insights and action items for Q2.",
+          "answer": "The language model is temporarily unavailable. Please try again in a minute. (Reference: 5fc6a11c53204730)",
+          "status": "error",
+          "blocked": false,
+          "trace_id": "5fc6a11c53204730",
+          "tools": [],
+          "tool_results": [],
+          "sql": [],
+          "confirmation": false,
+          "error": "llm_unavailable",
+          "latency_ms": 14262
+        }
+      ],
+      "accuracy": null,
+      "judge": {
+        "intent": 1,
+        "grounded": 5,
+        "format": 1,
+        "action_items": null,
+        "overall": 1,
+        "reasoning": "The assistant failed to provide the report and returned a system error message instead. Since there was no response generated, the intent and format criteria are not met."
+      },
+      "llm_calls": 1,
+      "input_tokens": 409,
+      "output_tokens": 35,
+      "latency_ms": 16086,
+      "error": null
+    }
+  ]
+}

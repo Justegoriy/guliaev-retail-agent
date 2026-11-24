@@ -41,8 +41,8 @@ comments and the other documents.
 | D15 | The Golden Bucket is "theoretical" in the assignment, so the prototype has a synthetic seed of 15 trios ([data/golden_trios.json](../data/golden_trios.json)) with embeddings retrieval, and updates through `/good` candidates plus analyst review. The full pipeline is in the HLD |
 | D16 | User preferences are implemented fully in the prototype (explicit and inferred) |
 | D17 | Persona is a text file re-read every turn, global for all users. Preferences take priority for format, the persona sets the tone; guardrails are in the immutable core |
-| D18 | Models: `gemini-3.8-flash` main, `gemini-3.5-flash-lite` for fallback and auxiliary calls (guard, extraction, summaries, eval judge), `gemini-embedding-001`. All configurable in `.env`. Free-tier limits (not guaranteed by Google) are roughly Flash 5 RPM / 20 RPD and Flash-Lite 15 RPM / 500 RPD, counted per model. With a free key it is practical to set `GEMINI_MODEL` to the Flash-Lite model |
-| D19 | Sizing for the HLD: up to 200 executives, up to 20 concurrent sessions, p95 at most 20 s for a simple question, 99.5% availability |
+| D18 | **Models** (confirmed by OpsFleet: newer Gemini, free AI Studio key, 2-5 LLM calls per question, fallback between Gemini models): `gemini-3.8-flash` main, `gemini-3.5-flash-lite` for fallback and auxiliary calls (guard, extraction, summaries, eval judge), `gemini-embedding-001`; all configurable in `.env`. At most `MAX_LLM_CALLS_PER_TURN` = 5 model calls per question (input guard, up to 3 agent steps, one post-turn call); the last agent step allowed has no tools and must answer. Retries of a failed call and the switch to the fallback model are not counted as extra calls. Free-tier limits (not guaranteed by Google) are roughly Flash 5 RPM / 20 RPD and Flash-Lite 15 RPM / 500 RPD, counted per model: once Flash's daily quota is used up, the agent continues on Flash-Lite |
+| D19 | **Sizing** (confirmed by OpsFleet): tens to a few hundred executives, a few active at once, about 100 active managers a day with about 10 questions each. Targets: 10-30 s for a simple question, 1-2 minutes for a long report; 99.5% availability (our assumption). Estimates in [architecture.md](architecture.md) |
 | D20 | The reviewer uses their own GCP project for BigQuery billing (`GOOGLE_CLOUD_PROJECT`) and their own AI Studio key |
 | D21 | The conversation is in English: prompts, answers and refusals. The input guard's rules also catch Russian injection and data-changing phrasing, so protection does not depend on the attack's language |
 | D22 | No charts in the prototype; they are an extension example in the design |
@@ -69,10 +69,16 @@ items over items that were not cancelled.
 | T6 | All "lite" implementations of design-only requirements are built (Golden Bucket, learning loop, eval, persona) |
 | T7 | `src` layout; `requirements.txt` ends with `-e .`, so `pip install -r requirements.txt` from the assignment makes `python -m retail_agent` work |
 
+## Answers from OpsFleet (2026-11-24)
+
+The client answered the earlier open questions; the assumptions above are updated and marked
+"confirmed by OpsFleet": access by brand (D1-D3), nothing outside the user's brands (D2), PII and
+attributes only in aggregates (D5-D8), hard delete and a one-year audit log (D11), reports only on
+request (D9), JWT scopes (D4), models and LLM budget (D18), sizing (D19).
+
 ## Open questions for OpsFleet
 
 1. **Identity provider:** which IdP issues the JWT in production (Google Workspace, Okta, other),
    and which claim carries the brands? The agent expects `sub`, `role` and `brands`.
-2. **Scale and SLA (D19):** please confirm the sizing assumptions.
-3. **Model (D18):** which Gemini model and which quota tier will you test with? On a free key the
-   main model's daily limit is reached quickly and the agent switches to the fallback.
+2. **Small groups:** should aggregates over very small groups (a city with one customer) be
+   suppressed, and with which minimum size (D7)?

@@ -38,6 +38,17 @@ from retail_agent.tools.registry import ToolContext
 AuxFactory = Callable[[type[BaseModel]], Runnable[Any, Any]]
 
 EMPTY_ANSWER = "I could not produce an answer this time. Please rephrase the question."
+# The last agent call the turn's LLM budget allows runs without tools and with this note.
+FINAL_CALL_NOTE = """
+
+# Last step of this turn
+This is your last model call for this question: answer the user now from the tool results \
+above, without calling any tools. If some data is still missing, say what is missing and \
+suggest a narrower follow-up question."""
+BUDGET_ANSWER = (
+    "I reached the limit of steps for one question before I could finish the analysis. "
+    'Please ask a narrower question, or say "continue" to go on from here.'
+)
 # Turns that are not about the data get no precedents (saves an embedding call).
 NO_PRECEDENTS_CATEGORIES = frozenset({"greeting", "preferences", "report_management"})
 # Turns without SQL that still get the post-turn extraction call, because the message may
@@ -53,6 +64,8 @@ class AgentDeps:
     tools: list[BaseTool]
     agent_model: Runnable[Any, AIMessage]  # tools already bound
     settings: Settings
+    # The model without tools, for the last step of a turn; None: agent_model.
+    answer_model: Runnable[Any, AIMessage] | None = None
     aux: AuxFactory | None = None  # None: rules-only guard, no context extraction/summaries
     prompt_sources: PromptSources = field(default_factory=PromptSources)
     today: Callable[[], date] = date.today
@@ -109,6 +122,7 @@ class AgentNodes:
             runnable = self._aux_runnables[schema]
 
         def call(prompt: str):
+            self.deps.tool_ctx.turn.count_llm_call()
             result = runnable.invoke([HumanMessage(prompt)], config)
             if not isinstance(result, schema):
                 raise TypeError(f"aux model returned {type(result).__name__}")
@@ -214,12 +228,33 @@ class AgentNodes:
             update["messages"] = [AIMessage(input_guard.refusal(result.category))]
         return update
 
+    def _final_agent_call(self) -> bool:
+        """Whether the next agent call is the last one the turn's LLM budget allows.
+
+        One call stays reserved for the post-turn extraction when an aux model is set."""
+        turn = self.deps.tool_ctx.turn
+        reserve = 1 if self.deps.aux is not None else 0
+        return turn.llm_calls + 1 + reserve >= self.deps.settings.max_llm_calls_per_turn
+
     def agent(self, state: AgentState, config: RunnableConfig) -> dict[str, Any]:
+        deps = self.deps
         history = memory.prepare_history(
-            state["messages"], max_turns=self.deps.settings.history_summarize_after_turns
+            state["messages"], max_turns=deps.settings.history_summarize_after_turns
         )
-        request: list[BaseMessage] = [SystemMessage(self.system_prompt(state)), *history]
-        response = self.deps.agent_model.invoke(request, config)
+        final = self._final_agent_call()
+        system = self.system_prompt(state) + (FINAL_CALL_NOTE if final else "")
+        if final and deps.answer_model is not None:
+            # No tools declared and no function calls in the history: the model can only answer.
+            history = memory.without_tool_parts(history)
+        request: list[BaseMessage] = [SystemMessage(system), *history]
+        model = (deps.answer_model or deps.agent_model) if final else deps.agent_model
+        calls = deps.tool_ctx.turn.count_llm_call()
+        if final:
+            log_event("llm_budget_final_call", llm_calls=calls)
+        response = model.invoke(request, config)
+        if final and response.tool_calls:
+            log_event("llm_budget_reached", level="warning", dropped_calls=len(response.tool_calls))
+            response = AIMessage(content=response.text or BUDGET_ANSWER, id=response.id)
         if not response.tool_calls:
             response = mask_ai_message(response, where="agent_answer")
         return {"messages": [response]}
@@ -343,12 +378,15 @@ class AgentNodes:
         if context is not None:
             update["analysis_context"] = context
         self._learn_preferences(state, extraction, context)
+        # The summary threshold is soft: when this turn used its whole LLM budget, the
+        # summary waits for the next turn.
+        within_budget = self.deps.tool_ctx.turn.llm_calls < settings.max_llm_calls_per_turn
         folded = memory.summarize(
             messages,
             state.get("history_summary"),
             keep_turns=settings.history_keep_turns,
             summarize_after=settings.history_summarize_after_turns,
-            summarizer=self._aux_call(memory.HistorySummary, config),
+            summarizer=self._aux_call(memory.HistorySummary, config) if within_budget else None,
         )
         if folded is not None:
             update["history_summary"], update["messages"] = folded

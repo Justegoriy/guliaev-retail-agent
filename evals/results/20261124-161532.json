@@ -1,0 +1,83 @@
+{
+  "started": "20261124-161532",
+  "commit": "f6dbc89",
+  "models": {
+    "main": "gemini-3.5-flash-lite",
+    "fallback": "gemini-3.5-flash-lite",
+    "aux": "gemini-3.5-flash-lite",
+    "judge": "gemini-3.5-flash-lite"
+  },
+  "filters": {
+    "only": [],
+    "case": [
+      "a9_states_comparison"
+    ]
+  },
+  "summary": {
+    "total": 1,
+    "passed": 0,
+    "by_category": {
+      "analytics": {
+        "passed": 0,
+        "total": 1
+      }
+    },
+    "judge_mean": 1.0,
+    "judge_unavailable": 0,
+    "models_used": {
+      "guard": {
+        "gemini-3.5-flash-lite": 1
+      }
+    },
+    "accuracy_passed": 0,
+    "accuracy_total": 0,
+    "llm_calls": 1,
+    "input_tokens": 407,
+    "output_tokens": 39
+  },
+  "cases": [
+    {
+      "id": "a9_states_comparison",
+      "category": "analytics",
+      "user": "ceo",
+      "passed": false,
+      "failures": [
+        "turn 1: turn failed: llm_unavailable",
+        "final: turn failed: llm_unavailable",
+        "final: 0 queries executed, expected at least 2",
+        "final: answer lacks 'Texas'",
+        "final: answer lacks 'California'",
+        "judge: overall 1/5"
+      ],
+      "turns": [
+        {
+          "text": "Why does Texas spend less than California? Compare them for 2024.",
+          "answer": "The language model is temporarily unavailable. Please try again in a minute. (Reference: 2fcbda6bae4449f0)",
+          "status": "error",
+          "blocked": false,
+          "trace_id": "2fcbda6bae4449f0",
+          "tools": [],
+          "tool_results": [],
+          "sql": [],
+          "confirmation": false,
+          "error": "llm_unavailable",
+          "latency_ms": 15797
+        }
+      ],
+      "accuracy": null,
+      "judge": {
+        "intent": 1,
+        "grounded": 5,
+        "format": 3,
+        "action_items": null,
+        "overall": 1,
+        "reasoning": "The assistant failed to answer the user's question due to a system error and provided no data or comparison."
+      },
+      "llm_calls": 1,
+      "input_tokens": 407,
+      "output_tokens": 39,
+      "latency_ms": 61493,
+      "error": null
+    }
+  ]
+}

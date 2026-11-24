@@ -516,6 +516,7 @@ class AgentResources:
             tool_ctx=tool_ctx,
             tools=tools,
             agent_model=build_chat_model("main", tools, settings=self.settings),
+            answer_model=build_chat_model("main", settings=self.settings),
             settings=self.settings,
             aux=self.aux,
             golden=self.golden,

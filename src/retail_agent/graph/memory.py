@@ -137,6 +137,35 @@ def prepare_history(
     return _without_unanswered_calls(out)
 
 
+def without_tool_parts(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
+    """The history as plain text: tool calls and results become ordinary messages.
+
+    For the last agent step of a turn, which runs without tools: with function calls in
+    the history a model may keep calling functions even when none are declared.
+    Consecutive messages of the same side are merged.
+    """
+    out: list[BaseMessage] = []
+
+    def add(message: BaseMessage) -> None:
+        if out and type(out[-1]) is type(message):
+            merged = f"{out[-1].text}\n\n{message.text}".strip()
+            out[-1] = type(message)(content=merged)
+        else:
+            out.append(message)
+
+    for message in messages:
+        if isinstance(message, AIMessage) and message.tool_calls:
+            names = ", ".join(c["name"] for c in message.tool_calls)
+            add(AIMessage(content=f"{message.text}\n(I called: {names})".strip()))
+        elif isinstance(message, ToolMessage):
+            add(HumanMessage(content=f"[Result of {message.name or 'a tool'}]\n{message.text}"))
+        elif isinstance(message, AIMessage):
+            add(AIMessage(content=message.text))
+        elif isinstance(message, HumanMessage):
+            add(HumanMessage(content=message.text))
+    return out
+
+
 # -- analysis context ---------------------------------------------------------------------
 
 

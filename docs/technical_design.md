@@ -31,7 +31,7 @@ Contents:
 |---|---|---|
 | Cloud | Google Cloud | The data is in BigQuery and the client tests with Gemini. Staying in one cloud keeps identity (IAM, IAP), data governance (row access policies, policy tags, DLP) and the LLM (Vertex AI) under one security perimeter (VPC Service Controls) |
 | Main model | Gemini Flash (`gemini-3.8-flash`) | Good tool calling and reasoning over tabular results at low latency and cost. A "Pro" model is not needed for SQL over four tables; the multi-step logic is carried by the prompt, tools and analyst precedents |
-| Light model | Gemini Flash-Lite (`gemini-3.5-flash-lite`) | Fallback for the main model and every auxiliary call: input classification, context and preference extraction, summarization of old turns, the eval judge. Quotas are per model, so these calls never consume the main model's budget (on the free tier Flash allows about 20 requests per day, Flash-Lite about 500) |
+| Light model | Gemini Flash-Lite (`gemini-3.5-flash-lite`) | Fallback for the main model and every auxiliary call: input classification, context and preference extraction, summarization of old turns, the eval judge. Quotas are per model, so these calls never consume the main model's budget (on the free tier Flash allows about 20 requests per day, Flash-Lite about 500; with up to 3 Flash calls per question the free key gives about 6 questions a day on Flash, then the agent continues on Flash-Lite) |
 | Embeddings | `gemini-embedding-001` | Same provider and key; retrieval-specific task types for documents and queries |
 | Framework | LangGraph (with LangChain core for model and tool abstractions) | See below |
 | SQL analysis | `sqlglot` (BigQuery dialect) | Parses the model's SQL into a tree, so read-only checks, table whitelist, PII projection checks and the ACL rewrite are done on structure, not with regexes |
@@ -340,8 +340,20 @@ one year.
 **Self-correction without inflating costs.** Dry runs (free) catch syntax errors and expensive
 scans; empty results come back as `EMPTY` with advice to check values (`SELECT DISTINCT`);
 the model gets the error and attempts left. Bounds per turn: 3 failed SQL attempts, then `STOP`
-and an explanation; 10 GB of BigQuery; 15 agent steps; old tool results are shortened in the
-history. Identical queries hit a 10-minute result cache. The schema is cached for 7 days.
+and an explanation; 10 GB of BigQuery; at most 5 LLM calls; old tool results are shortened in the
+history.
+
+**LLM budget per question** (`MAX_LLM_CALLS_PER_TURN` = 5, D18). Every model call of a turn is
+counted: the input-guard classifier (skipped when the rules already decide), each agent step, and
+the post-turn call that extracts the analysis context, preference signals and the title. One call
+is reserved for the post-turn step, so the agent gets up to 3 steps (4 when the rules decided the
+guard). Several queries of one step run in parallel, so a "why" question or a quarterly report
+fits: step 1 runs the queries for the hypotheses, step 2 follows up, step 3 answers. The last step
+allowed is called without tools and with a note to answer from what it has; if the model still
+asks for a tool, the calls are dropped and the user gets the answer so far or a suggestion to
+narrow the question. The history summary, which is rare, waits for a cheaper turn when the budget
+is used up. Retries and the switch to the fallback model are not extra calls: they repeat the
+same call. A typical question takes 3-4 calls. Identical queries hit a 10-minute result cache. The schema is cached for 7 days.
 
 **Third-party failures.**
 
@@ -375,7 +387,7 @@ idempotent handlers.
 
 **Before deployment.**
 
-- *Unit tests* (532, no network): SQL Guard and PII bypasses, ACL rewrite, masking, confirmation
+- *Unit tests* (613, no network): SQL Guard and PII bypasses, ACL rewrite, masking, confirmation
   flow (including "yes" in the chat not confirming and a changed set being refused), history and
   summarization, preferences, retries and fallbacks, CLI, web app. 21 network tests run against
   real Gemini and BigQuery on demand (`pytest -m network`).
@@ -504,7 +516,7 @@ trace sampling for weekly manual review.
 | LangSmith unreachable or bad key | Tracing off, local logs continue | One warning line at start |
 | Bad API key, unknown model, no credentials, wrong project | Start-up check fails with a hint, exit code 2 | "Gemini rejected GOOGLE_API_KEY; check the key." etc. |
 | Network down at start | Warnings, the CLI starts | Warnings, then friendly errors per turn |
-| Too many agent steps | Step limit (15) | "The request turned out to be too complex... split it into smaller questions." |
+| LLM budget used up | The last agent step runs without tools and must answer (5 calls per question) | The answer from the data so far, or "ask a narrower question, or say continue" |
 | Ctrl+C during a turn | Turn cancelled, history kept valid | "(cancelled)" |
 | Anything else | Caught at the turn level, logged with trace id | "Something went wrong on our side. Please try again. (Reference: id)" |
 

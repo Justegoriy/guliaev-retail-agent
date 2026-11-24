@@ -1,0 +1,88 @@
+{
+  "started": "20261124-161412",
+  "commit": "f6dbc89",
+  "models": {
+    "main": "gemini-3.5-flash-lite",
+    "fallback": "gemini-3.5-flash-lite",
+    "aux": "gemini-3.5-flash-lite",
+    "judge": "gemini-3.5-flash-lite"
+  },
+  "filters": {
+    "only": [],
+    "case": [
+      "a9_states_comparison"
+    ]
+  },
+  "summary": {
+    "total": 1,
+    "passed": 0,
+    "by_category": {
+      "analytics": {
+        "passed": 0,
+        "total": 1
+      }
+    },
+    "judge_mean": 1.0,
+    "judge_unavailable": 0,
+    "models_used": {
+      "guard": {
+        "gemini-3.5-flash-lite": 1
+      },
+      "main": {
+        "gemini-3.5-flash-lite": 1
+      }
+    },
+    "accuracy_passed": 0,
+    "accuracy_total": 0,
+    "llm_calls": 2,
+    "input_tokens": 5061,
+    "output_tokens": 544
+  },
+  "cases": [
+    {
+      "id": "a9_states_comparison",
+      "category": "analytics",
+      "user": "ceo",
+      "passed": false,
+      "failures": [
+        "turn 1: turn failed: llm_unavailable",
+        "final: turn failed: llm_unavailable",
+        "final: 1 queries executed, expected at least 2",
+        "final: answer lacks 'Texas'",
+        "final: answer lacks 'California'",
+        "judge: overall 1/5"
+      ],
+      "turns": [
+        {
+          "text": "Why does Texas spend less than California? Compare them for 2024.",
+          "answer": "The language model is temporarily unavailable. Please try again in a minute. (Reference: d05078c72b4845a9)",
+          "status": "error",
+          "blocked": false,
+          "trace_id": "d05078c72b4845a9",
+          "tools": [],
+          "tool_results": [],
+          "sql": [
+            "WITH state_metrics AS (\n  SELECT\n    u.state,\n    COUNT(DISTINCT u.id) AS registered_customers,\n    COUNT(DISTINCT oi.user_id) AS active_customers,\n    COUNT(DISTINCT IF(oi.status NOT IN ('Cancelled', 'Returned'), oi.order_id, NULL)) AS orders,\n    COUNTIF(oi.status NOT IN ('Cancelled', 'Returned')) AS units_sold,\n    SUM(IF(oi.status NOT IN ('Cancelled', 'Returned'), oi.sale_price, 0)) AS revenue,\n    SUM(IF(oi.status NOT IN ('Cancelled', 'Returned'), oi.sale_price - p.cost, 0)) AS margin,\n    COUNTIF(oi.status = 'Returned') AS returned_items,\n    COUNTIF(oi.status != 'Cancelled') AS non_cancelled_items\n  FROM `bigquery-public-data.thelook_ecommerce.users` u\n  LEFT JOIN `bigquery-public-data.thelook_ecommerce.order_items` oi\n    ON oi.user_id = u.id\n    AND EXTRACT(YEAR FROM oi.created_at) = 2024\n  LEFT JOIN `bigquery-public-data.thelook_ecommerce.products` p\n    ON oi.product_id = p.id\n  WHERE u.state IN ('Texas', 'California')\n  GROUP BY u.state\n)\nSELECT\n  state,\n  registered_customers,\n  active_customers,\n  orders,\n  ROUND(revenue, 2) AS revenue,\n  ROUND(margin, 2) AS margin,\n  ROUND(SAFE_DIVIDE(revenue, orders), 2) AS aov,\n  ROUND(SAFE_DIVIDE(revenue, active_customers), 2) AS revenue_per_active_customer,\n  ROUND(SAFE_DIVIDE(returned_items, non_cancelled_items) * 100, 1) AS return_rate_pct\nFROM state_metrics\nORDER BY revenue DESC"
+          ],
+          "confirmation": false,
+          "error": "llm_unavailable",
+          "latency_ms": 15818
+        }
+      ],
+      "accuracy": null,
+      "judge": {
+        "intent": 1,
+        "grounded": 5,
+        "format": 3,
+        "action_items": null,
+        "overall": 1,
+        "reasoning": "The assistant failed to answer the user's question due to a system error. No comparison or data was provided."
+      },
+      "llm_calls": 2,
+      "input_tokens": 5061,
+      "output_tokens": 544,
+      "latency_ms": 73162,
+      "error": null
+    }
+  ]
+}

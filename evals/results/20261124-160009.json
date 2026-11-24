@@ -1,0 +1,186 @@
+{
+  "started": "20261124-160009",
+  "commit": "f6dbc89",
+  "models": {
+    "main": "gemini-3.5-flash-lite",
+    "fallback": "gemini-3.5-flash-lite",
+    "aux": "gemini-3.5-flash-lite",
+    "judge": "gemini-3.5-flash-lite"
+  },
+  "filters": {
+    "only": [],
+    "case": [
+      "a10_quarterly_report",
+      "a35_churn",
+      "a9_states_comparison"
+    ]
+  },
+  "summary": {
+    "total": 3,
+    "passed": 0,
+    "by_category": {
+      "analytics": {
+        "passed": 0,
+        "total": 2
+      },
+      "report": {
+        "passed": 0,
+        "total": 1
+      }
+    },
+    "judge_mean": 1.0,
+    "judge_unavailable": 1,
+    "models_used": {
+      "main": {
+        "gemini-3.5-flash-lite": 5
+      },
+      "guard": {
+        "gemini-3.5-flash-lite": 3
+      }
+    },
+    "accuracy_passed": 0,
+    "accuracy_total": 0,
+    "llm_calls": 8,
+    "input_tokens": 27537,
+    "output_tokens": 1431
+  },
+  "cases": [
+    {
+      "id": "a9_states_comparison",
+      "category": "analytics",
+      "user": "ceo",
+      "passed": false,
+      "failures": [
+        "final: answer lacks 'Texas'",
+        "final: answer lacks 'California'",
+        "judge: overall 1/5"
+      ],
+      "turns": [
+        {
+          "text": "Why does Texas spend less than California? Compare them for 2024.",
+          "answer": "I reached the limit of steps for one question before I could finish the analysis. Please ask a narrower question, or say \"continue\" to go on from here.",
+          "status": "ok",
+          "blocked": false,
+          "trace_id": "561ebd67a874420f",
+          "tools": [
+            "run_sql",
+            "run_sql"
+          ],
+          "tool_results": [
+            [
+              "run_sql",
+              "OK: rows=2, showing first 2\n\nstate,registered_customers,active_buyers,orders,revenue,margin,aov,revenue_per_registered_customer,revenue_per_active_buyer,orders_per_active_buyer\nCalifornia,3665,452,501,44772.83,23184.07,89.37,12.22,99.05,1.11\nTexas,2466,306,329,26322.03,13650.81,80.01,10.67,86.02,1.08"
+            ],
+            [
+              "run_sql",
+              "OK: rows=10, showing first 10\n\nstate,traffic_source,registered_customers,revenue\nCalifornia,Search,2555,31490.36\nCalifornia,Organic,584,7195.45\nCalifornia,Email,194,2395.36\nCalifornia,Facebook,198,2076.56\nCalifornia,Display,134,1615.1\nTexas,Search,1724,17317.5\nTexas,Organic,359,5802.28\nTexas,Facebook,163,1552.11\nTexas,Email,117,948.14\nTexas,Display,103,702.0"
+            ]
+          ],
+          "sql": [
+            "WITH state_metrics AS (\n  SELECT\n    u.state,\n    COUNT(DISTINCT u.id) AS registered_customers,\n    COUNT(DISTINCT IF(oi.status NOT IN ('Cancelled', 'Returned'), u.id, NULL)) AS active_buyers,\n    COUNT(DISTINCT IF(oi.status NOT IN ('Cancelled', 'Returned'), oi.order_id, NULL)) AS orders,\n    COUNTIF(oi.status NOT IN ('Cancelled', 'Returned')) AS items_sold,\n    SUM(IF(oi.status NOT IN ('Cancelled', 'Returned'), oi.sale_price, 0)) AS revenue,\n    SUM(IF(oi.status NOT IN ('Cancelled', 'Returned'), oi.sale_price - p.cost, 0)) AS margin\n  FROM `bigquery-public-data.thelook_ecommerce.users` u\n  LEFT JOIN `bigquery-public-data.thelook_ecommerce.order_items` oi\n    ON oi.user_id = u.id\n    AND EXTRACT(YEAR FROM oi.created_at) = 2024\n  LEFT JOIN `bigquery-public-data.thelook_ecommerce.products` p\n    ON oi.product_id = p.id\n  WHERE u.state IN ('Texas', 'California')\n  GROUP BY u.state\n)\nSELECT\n  state,\n  registered_customers,\n  active_buyers,\n  orders,\n  ROUND(revenue, 2) AS revenue,\n  ROUND(margin, 2) AS margin,\n  ROUND(SAFE_DIVIDE(revenue, orders), 2) AS aov,\n  ROUND(SAFE_DIVIDE(revenue, registered_customers), 2) AS revenue_per_registered_customer,\n  ROUND(SAFE_DIVIDE(revenue, active_buyers), 2) AS revenue_per_active_buyer,\n  ROUND(SAFE_DIVIDE(orders, active_buyers), 2) AS orders_per_active_buyer\nFROM state_metrics\nORDER BY state",
+            "SELECT\n  u.state,\n  u.traffic_source,\n  COUNT(DISTINCT u.id) AS registered_customers,\n  SUM(IF(oi.status NOT IN ('Cancelled', 'Returned'), oi.sale_price, 0)) AS revenue\nFROM `bigquery-public-data.thelook_ecommerce.users` u\nLEFT JOIN `bigquery-public-data.thelook_ecommerce.order_items` oi\n  ON oi.user_id = u.id\n  AND EXTRACT(YEAR FROM oi.created_at) = 2024\nWHERE u.state IN ('Texas', 'California')\nGROUP BY u.state, u.traffic_source\nORDER BY u.state, revenue DESC"
+          ],
+          "confirmation": false,
+          "error": null,
+          "latency_ms": 73179
+        }
+      ],
+      "accuracy": null,
+      "judge": {
+        "intent": 1,
+        "grounded": 5,
+        "format": 3,
+        "action_items": null,
+        "overall": 1,
+        "reasoning": "The assistant failed to answer the user's question, stopping prematurely and asking the user to continue. Although evidence was available, it was not used to provide the requested comparison."
+      },
+      "llm_calls": 4,
+      "input_tokens": 14787,
+      "output_tokens": 1019,
+      "latency_ms": 74466,
+      "error": null
+    },
+    {
+      "id": "a35_churn",
+      "category": "analytics",
+      "user": "ceo",
+      "passed": false,
+      "failures": [
+        "turn 1: turn failed: llm_unavailable",
+        "final: turn failed: llm_unavailable",
+        "final: tools not called: ['run_sql'] (called: [])",
+        "final: answer has none of ['churn', 'отток']"
+      ],
+      "turns": [
+        {
+          "text": "Почему в прошлом месяце вырос churn?",
+          "answer": "The language model is temporarily unavailable. Please try again in a minute. (Reference: fe5bbc0d87dd42f8)",
+          "status": "error",
+          "blocked": false,
+          "trace_id": "fe5bbc0d87dd42f8",
+          "tools": [],
+          "tool_results": [],
+          "sql": [
+            "SELECT MIN(DATE(created_at)) AS min_date, MAX(DATE(created_at)) AS max_date FROM `bigquery-public-data.thelook_ecommerce.order_items`",
+            "WITH active AS (\n  SELECT DISTINCT user_id, DATE_TRUNC(DATE(created_at), MONTH) AS month\n  FROM `bigquery-public-data.thelook_ecommerce.order_items`\n  WHERE status NOT IN ('Cancelled', 'Returned')\n),\ntransitions AS (\n  SELECT a.month AS prev_month, a.user_id, b.user_id IS NOT NULL AS retained\n  FROM active a\n  LEFT JOIN active b\n    ON b.user_id = a.user_id AND b.month = DATE_ADD(a.month, INTERVAL 1 MONTH)\n)\nSELECT\n  FORMAT_DATE('%Y-%m', DATE_ADD(prev_month, INTERVAL 1 MONTH)) AS month,\n  COUNT(*) AS active_previous_month,\n  COUNTIF(NOT retained) AS churned,\n  ROUND(SAFE_DIVIDE(COUNTIF(NOT retained), COUNT(*)), 4) AS churn_rate\nFROM transitions\nWHERE prev_month >= DATE '2026-05-01'\nGROUP BY month\nORDER BY month"
+          ],
+          "confirmation": false,
+          "error": "llm_unavailable",
+          "latency_ms": 119259
+        }
+      ],
+      "accuracy": null,
+      "judge": {
+        "error": "GoogleAPIError: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}"
+      },
+      "llm_calls": 3,
+      "input_tokens": 12341,
+      "output_tokens": 376,
+      "latency_ms": 219507,
+      "error": null
+    },
+    {
+      "id": "a10_quarterly_report",
+      "category": "report",
+      "user": "ceo",
+      "passed": false,
+      "failures": [
+        "turn 1: turn failed: llm_unavailable",
+        "final: turn failed: llm_unavailable",
+        "final: tools not called: ['run_sql'] (called: [])",
+        "final: answer has none of ['action']",
+        "judge: overall 1/5",
+        "judge: action items 1/5"
+      ],
+      "turns": [
+        {
+          "text": "Make a Q1 2025 report with insights and action items for Q2.",
+          "answer": "The language model is temporarily unavailable. Please try again in a minute. (Reference: a113259a4a6744ea)",
+          "status": "error",
+          "blocked": false,
+          "trace_id": "a113259a4a6744ea",
+          "tools": [],
+          "tool_results": [],
+          "sql": [],
+          "confirmation": false,
+          "error": "llm_unavailable",
+          "latency_ms": 40276
+        }
+      ],
+      "accuracy": null,
+      "judge": {
+        "intent": 1,
+        "grounded": 5,
+        "format": 1,
+        "action_items": 1,
+        "overall": 1,
+        "reasoning": "The assistant failed to answer the user's request due to a service error and provided no report, metrics, or action items."
+      },
+      "llm_calls": 1,
+      "input_tokens": 409,
+      "output_tokens": 36,
+      "latency_ms": 42380,
+      "error": null
+    }
+  ]
+}

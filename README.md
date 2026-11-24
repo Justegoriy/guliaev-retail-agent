@@ -372,7 +372,8 @@ each one. The ones you are most likely to change:
 | `GEMINI_FALLBACK_MODEL`, `GEMINI_AUX_MODEL` | `gemini-3.5-flash-lite` | Fallback, and the model for guard, extraction, summaries and the eval judge |
 | `LLM_RPM`, `LLM_AUX_RPM` | 5, 10 | Client-side requests per minute per model |
 | `BQ_MAX_BYTES_BILLED`, `TURN_MAX_BQ_BYTES` | 2 GB, 10 GB | BigQuery limits per query and per turn |
-| `MAX_SQL_FAILURES`, `MAX_AGENT_STEPS` | 3, 15 | Self-correction attempts and agent steps per turn |
+| `MAX_SQL_FAILURES` | 3 | Failed SQL attempts per question before the agent stops and explains |
+| `MAX_LLM_CALLS_PER_TURN` | 5 | Model calls per question: input guard, agent steps, post-turn call |
 | `INPUT_GUARD_LLM` | `true` | Use the classifier in addition to rules |
 | `LOG_LLM_PAYLOADS` | `true` | Write full model conversations for `/trace --full` |
 

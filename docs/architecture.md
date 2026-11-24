@@ -18,8 +18,25 @@ Contents:
 8. [Data storage](#8-data-storage)
 9. [Component interaction](#9-component-interaction)
 
-Sizing assumption (D19): up to 200 executives, up to 20 concurrent sessions, p95 under 20 s for a
-simple question, 99.5% availability.
+Sizing (D19, confirmed by OpsFleet): tens to a few hundred executives, about 100 active managers
+a day asking about 10 questions each, only a few active at once. Targets: 10-30 s for a simple
+question, 1-2 minutes for a long report. What that means for the design:
+
+| Quantity | Estimate | How it was derived |
+|---|---|---|
+| Questions | about 1,000 a day; about 2 a minute on average in an 8-hour day, about 6 a minute at a 3x peak | 100 managers x 10 questions |
+| Busy sessions at the peak | about 3 for simple questions (30 s), up to about 12 if all were long reports (2 min) | 6 questions a minute x time per question |
+| LLM calls | at most 5 per question (input guard, up to 3 agent steps, one post-turn call), so at most 5,000 a day and about 30 a minute at the peak | the per-turn budget, see technical design R5 |
+| Tokens per question | median 11k in / 0.35k out, p90 21k / 1.2k | prototype eval run of 2026-11-23 |
+| LLM cost | about $10 a day at the median, $21 a day at the p90 (Flash prices, $0.75 / $3.75 per 1M tokens; auxiliary calls on Flash-Lite cost less) | 1,000 questions x tokens |
+| BigQuery | about 10 MB per query on `thelook_ecommerce`, under 0.1 TB a day; capped at 2 GB per query and 10 GB per question | prototype logs |
+
+So the load is small: one Cloud Run service with a minimum of one instance covers the peak, and
+the binding constraint is the LLM quota, not compute. On a free AI Studio key (Flash about 5
+requests a minute and 20 a day, Flash-Lite about 15 and 500) the prototype answers a handful of
+questions a day on Flash, about 6 since each uses up to 3 Flash calls, and then switches to
+Flash-Lite automatically (D18); production uses Vertex AI with a paid quota. Availability target:
+99.5%.
 
 ---
 
@@ -123,7 +140,7 @@ How to read it:
 |---|---|---|---|
 | Identity | Identity-Aware Proxy + SSO (Google Workspace or Okta via SAML/OIDC) | Executives log in with the corporate account; the frontend passes a JWT signed by the identity provider whose claims carry the role and brands (from directory groups), and the agent verifies it against the IdP's JWKS. No passwords in the app | App-level OAuth: more code and more to get wrong. API keys per user: no SSO, no offboarding |
 | Edge | HTTPS Load Balancer + Cloud Armor | TLS, WAF rules, rate limiting per client | API Gateway: fine for pure APIs, weaker for the web app and websockets/streaming |
-| Agent compute | Cloud Run (min 1 instance, autoscale, concurrency ~10) | Stateless container, scales to the 20 concurrent sessions easily, streaming responses, pay per use, VPC connector | GKE: operational overhead not justified at 200 users. Cloud Functions: request time limits and cold starts for long multi-step turns |
+| Agent compute | Cloud Run (min 1 instance, autoscale, concurrency ~10) | Stateless container, one instance covers the peak of about 3-12 busy sessions and it scales out if usage grows, streaming responses, pay per use, VPC connector | GKE: operational overhead not justified at a few hundred users. Cloud Functions: request time limits and cold starts for long multi-step turns |
 | Background jobs | Cloud Run Jobs / Cloud Run services subscribed to Pub/Sub | Same container image and code as the agent, retries and dead-letter topics from Pub/Sub | Cloud Composer: too heavy for a handful of event handlers |
 | LLM | Gemini Flash (main) and Flash-Lite (fallback, guard, extraction, summaries, judge) on Vertex AI | Required by the client; Vertex gives enterprise quotas, SLA, data residency, VPC-SC, no training on our data. Flash-Lite for cheap high-volume calls keeps the main model's quota for reasoning | AI Studio API (used in the prototype): free tier, no SLA, low quotas. Other providers: possible behind the same interface, but the client tests with Gemini |
 | Embeddings and retrieval | Vertex AI embeddings + Vertex AI Vector Search (hybrid: dense + sparse/keyword) | Managed ANN index with metadata filters (status, schema version, tables), hybrid search for metric names and SQL terms | BigQuery Vector Search: good for batch, higher latency per query. AlloyDB pgvector: one more database to run. At a few thousand trios any of them works; Vector Search keeps it serverless |

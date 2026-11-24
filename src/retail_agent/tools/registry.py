@@ -45,6 +45,7 @@ class TurnState:
         # A deletion request in this turn matched nothing: the model must not go on to try
         # broader criteria by itself ("Q1 2025" -> "2025" -> "report").
         self.deletion_no_match = False
+        self.llm_calls = 0  # model calls of this turn (agent and auxiliary), for the budget
 
     def reset(self) -> None:
         with self._lock:
@@ -52,6 +53,12 @@ class TurnState:
             self.bq_bytes = 0
             self.executed = []
             self.deletion_no_match = False
+            self.llm_calls = 0
+
+    def count_llm_call(self) -> int:
+        with self._lock:
+            self.llm_calls += 1
+            return self.llm_calls
 
     def add_failure(self) -> int:
         with self._lock:
