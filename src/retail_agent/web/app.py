@@ -42,7 +42,7 @@ def reset_view_state() -> None:
     state.turn = None  # a Turn waiting for a confirmation
     state.last = None  # {"trace_id", "conversation_id", "url"} of the last answered turn
     state.notice = None  # (level, text) of a failed or cancelled turn
-    state.feedback = {}  # trace_id -> message shown after рџ‘Ќ/рџ‘Ћ
+    state.feedback = {}  # trace_id -> message shown after 👍/👎
     state.flash = None  # (level, text) shown once at the top of a view
 
 
@@ -75,7 +75,7 @@ def sidebar(backend: web.Backend) -> AgentSession | None:
         user_id = st.selectbox(
             "User",
             list(users),
-            format_func=lambda u: f"{users[u].name} В· {users[u].role}",
+            format_func=lambda u: f"{users[u].name} · {users[u].role}",
             key="user_id",
         )
         user = users[user_id]
@@ -102,12 +102,12 @@ def conversations_panel(session: AgentSession) -> None:
         st.rerun()
     for c in session.conversations(limit=CONVERSATIONS_SHOWN):
         current = c.id == session.conversation_id
-        title = c.title if len(c.title) <= 40 else c.title[:39] + "вЂ¦"
+        title = c.title if len(c.title) <= 40 else c.title[:39] + "…"
         clicked = st.button(
             title,
             key=f"conv_{c.id}",
             type="primary" if current else "secondary",
-            help=f"{c.turns} turns В· updated {web.short_date(c.updated_at)} UTC",
+            help=f"{c.turns} turns · updated {web.short_date(c.updated_at)} UTC",
             width="stretch",
         )
         if clicked and not current:
@@ -252,7 +252,7 @@ def chat_view(session: AgentSession) -> None:
     if last and last["conversation_id"] == session.conversation_id and not pending:
         trace_line = f"trace `{last['trace_id']}`"
         if last["url"]:
-            trace_line += f" В· [LangSmith]({last['url']})"
+            trace_line += f" · [LangSmith]({last['url']})"
         st.caption(trace_line)
         feedback(session, last["trace_id"])
     if state.notice:
@@ -342,8 +342,8 @@ def reports_view(session: AgentSession) -> None:
         return
     st.caption("To delete reports, ask in the chat; deletion always asks for confirmation.")
     for r in reports:
-        here = " В· this conversation" if r.conversation_id == session.conversation_id else ""
-        with st.expander(f"{r.title} В· {web.short_date(r.created_at)} UTC{here}"):
+        here = " · this conversation" if r.conversation_id == session.conversation_id else ""
+        with st.expander(f"{r.title} · {web.short_date(r.created_at)} UTC{here}"):
             st.markdown(r.content)
             st.download_button(
                 "Download .md",
