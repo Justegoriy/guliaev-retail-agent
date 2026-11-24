@@ -349,7 +349,10 @@ the post-turn call that extracts the analysis context, preference signals and th
 is reserved for the post-turn step, so the agent gets up to 3 steps (4 when the rules decided the
 guard). Several queries of one step run in parallel, so a "why" question or a quarterly report
 fits: step 1 runs the queries for the hypotheses, step 2 follows up, step 3 answers. The last step
-allowed is called without tools and with a note to answer from what it has; if the model still
+allowed is called on the model without tools, with a note to answer from what it has and the
+history turned into plain text (query results as a "Data from your queries" block): with function
+calls left in the history, Flash-Lite kept calling functions even with none declared or with
+`tool_choice="none"`; if the model still
 asks for a tool, the calls are dropped and the user gets the answer so far or a suggestion to
 narrow the question. The history summary, which is rare, waits for a cheaper turn when the budget
 is used up. Retries and the switch to the fallback model are not extra calls: they repeat the

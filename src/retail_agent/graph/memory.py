@@ -137,16 +137,23 @@ def prepare_history(
     return _without_unanswered_calls(out)
 
 
-def without_tool_parts(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
-    """The history as plain text: tool calls and results become ordinary messages.
+TOOL_DATA_HEADER = "Data from your queries"
 
-    For the last agent step of a turn, which runs without tools: with function calls in
-    the history a model may keep calling functions even when none are declared.
-    Consecutive messages of the same side are merged.
+
+def without_tool_parts(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
+    """The history as plain text, for the last agent step of a turn (run without tools).
+
+    With function calls in the history a model may keep calling functions even when none
+    are declared. Assistant messages that only called tools are dropped (any text they had
+    is kept); tool results become a user-side block "Data from your queries". Nothing in
+    the result looks like a tool call, so the model has no pattern to imitate. Consecutive
+    messages of the same side are merged.
     """
     out: list[BaseMessage] = []
 
     def add(message: BaseMessage) -> None:
+        if not message.text.strip():
+            return
         if out and type(out[-1]) is type(message):
             merged = f"{out[-1].text}\n\n{message.text}".strip()
             out[-1] = type(message)(content=merged)
@@ -154,11 +161,12 @@ def without_tool_parts(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
             out.append(message)
 
     for message in messages:
-        if isinstance(message, AIMessage) and message.tool_calls:
-            names = ", ".join(c["name"] for c in message.tool_calls)
-            add(AIMessage(content=f"{message.text}\n(I called: {names})".strip()))
-        elif isinstance(message, ToolMessage):
-            add(HumanMessage(content=f"[Result of {message.name or 'a tool'}]\n{message.text}"))
+        if isinstance(message, ToolMessage):
+            add(
+                HumanMessage(
+                    content=f"{TOOL_DATA_HEADER} ({message.name or 'tool'}):\n{message.text}"
+                )
+            )
         elif isinstance(message, AIMessage):
             add(AIMessage(content=message.text))
         elif isinstance(message, HumanMessage):

@@ -93,7 +93,7 @@ def test_last_call_gets_the_history_without_tool_parts(tmp_path):
     assert not any(isinstance(m, ToolMessage) for m in request)
     assert not any(isinstance(m, AIMessage) and m.tool_calls for m in request)
     data = [m.text for m in request if isinstance(m, HumanMessage)]
-    assert any("[Result of run_sql]" in t and "OK" in t for t in data)
+    assert any("Data from your queries (run_sql)" in t and "OK" in t for t in data)
     assert len(h.model.requests) == 2  # the tool-bound model was not used for the last step
 
 
@@ -108,9 +108,12 @@ def test_without_tool_parts_merges_neighbours():
             HumanMessage("q"),
             AIMessage("", tool_calls=[call]),
             ToolMessage("OK: rows=1", tool_call_id="c1", name="run_sql"),
-            HumanMessage("and?"),
+            AIMessage("Checking one more thing.", tool_calls=[{**call, "id": "c2"}]),
+            ToolMessage("OK: rows=2", tool_call_id="c2", name="run_sql"),
         ]
     )
     assert [type(m).__name__ for m in out] == ["HumanMessage", "AIMessage", "HumanMessage"]
-    assert out[1].text == "(I called: run_sql)"
-    assert out[2].text == "[Result of run_sql]\nOK: rows=1\n\nand?"
+    assert out[0].text == "q\n\nData from your queries (run_sql):\nOK: rows=1"
+    assert out[1].text == "Checking one more thing."
+    assert out[2].text == "Data from your queries (run_sql):\nOK: rows=2"
+    assert not any("called" in m.text.lower() for m in out)  # nothing to imitate
