@@ -121,7 +121,7 @@ How to read it:
 
 | Building block | Service | Why | Alternatives and why not |
 |---|---|---|---|
-| Identity | Identity-Aware Proxy + SSO (Google Workspace or Okta via SAML/OIDC) | Executives log in with the corporate account; IAP passes a signed identity header, the group membership becomes the data scope. No passwords in the app | App-level OAuth: more code and more to get wrong. API keys per user: no SSO, no offboarding |
+| Identity | Identity-Aware Proxy + SSO (Google Workspace or Okta via SAML/OIDC) | Executives log in with the corporate account; the frontend passes a JWT signed by the identity provider whose claims carry the role and brands (from directory groups), and the agent verifies it against the IdP's JWKS. No passwords in the app | App-level OAuth: more code and more to get wrong. API keys per user: no SSO, no offboarding |
 | Edge | HTTPS Load Balancer + Cloud Armor | TLS, WAF rules, rate limiting per client | API Gateway: fine for pure APIs, weaker for the web app and websockets/streaming |
 | Agent compute | Cloud Run (min 1 instance, autoscale, concurrency ~10) | Stateless container, scales to the 20 concurrent sessions easily, streaming responses, pay per use, VPC connector | GKE: operational overhead not justified at 200 users. Cloud Functions: request time limits and cold starts for long multi-step turns |
 | Background jobs | Cloud Run Jobs / Cloud Run services subscribed to Pub/Sub | Same container image and code as the agent, retries and dead-letter topics from Pub/Sub | Cloud Composer: too heavy for a handful of event handlers |
@@ -390,7 +390,7 @@ fallback share above 50%, cost per day above budget, any BigQuery access-denied 
 ```mermaid
 flowchart LR
     subgraph Prototype
-        P1[CLI / Streamlit, --user flag]
+        P1[CLI / Streamlit, demo JWT from --user or --token]
         P2[Python process]
         P3[AI Studio Gemini API key]
         P4[SQL Guard ACL rewrite]

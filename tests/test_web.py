@@ -81,7 +81,7 @@ def test_start_page_has_user_picker_status_and_chat(app):
     at = app.run()
 
     assert at.sidebar.selectbox(key="user_id").value == "ceo"
-    assert "Demo without authentication" in app.texts()
+    assert "Demo sign-in: a signed token" in app.texts()
     assert len(at.chat_input) == 1
     assert at.sidebar.expander[0].label == "System status"
 
@@ -236,3 +236,24 @@ def test_startup_failure_is_explained(h):
 
     assert at.error and "could not start" in at.error[0].value
     assert not at.chat_input
+
+
+def test_token_in_the_url_signs_in_with_its_scope(h, app):
+    from retail_agent import auth
+
+    manager = UserContext("nike_manager", "Nora", "manager", ("Nike",))
+    app.at.query_params["token"] = auth.issue_token(manager, h.settings)
+    app.run()
+    texts = app.texts()
+    assert "Signed in with a token: **Nora** (manager)" in texts and "Data access: Nike" in texts
+    assert not app.at.sidebar.selectbox  # no user picker when the frontend passes a token
+    assert app.at.session_state["agent"].user == manager  # built from the verified token
+
+
+def test_bad_token_in_the_url_is_refused(h, app):
+    app.at.query_params["token"] = "garbage"
+    app.run()
+    errors = [e.value for e in app.at.error]
+    assert any("Sign-in failed: invalid token" in e for e in errors)
+    assert not any("could not start" in e for e in errors)
+    assert not app.at.chat_input

@@ -66,12 +66,25 @@ class Settings(BaseSettings):
     log_path: Path = Path("logs/agent.jsonl")
     log_llm_payloads: bool = True
 
+    # Authentication (JWT with the user's scope, D4)
+    auth_jwt_secret: SecretStr | None = None  # unset: a local secret in dev_jwt_secret_path
+    auth_jwt_issuer: str = "retail-agent-dev"
+    auth_jwt_audience: str = "retail-agent"
+    auth_token_ttl_s: int = Field(8 * 3600, gt=0)
+    dev_jwt_secret_path: Path = Path("data/dev_jwt_secret")
+
     # LangSmith
     langsmith_tracing: bool = False
     langsmith_api_key: SecretStr | None = None
     langsmith_project: str = "retail-agent"
 
-    @field_validator("google_api_key", "langsmith_api_key", "google_cloud_project", mode="before")
+    @field_validator(
+        "google_api_key",
+        "langsmith_api_key",
+        "google_cloud_project",
+        "auth_jwt_secret",
+        mode="before",
+    )
     @classmethod
     def _empty_to_none(cls, value):
         return value or None
@@ -85,6 +98,7 @@ class Settings(BaseSettings):
         "golden_index_path",
         "golden_candidates_path",
         "preferences_config_path",
+        "dev_jwt_secret_path",
     )
     @classmethod
     def _resolve_path(cls, value: Path) -> Path:

@@ -199,8 +199,18 @@ formats) with their trace ids are in the eval results, for example
 
 ## Demo users
 
-Defined in [config/users.yaml](config/users.yaml). There is no password: choosing a user simulates
-authentication.
+Defined in [config/users.yaml](config/users.yaml), the access table. Access is taken from a JWT, as
+if a frontend sent it: `--user` (or the web sidebar) issues a signed token with the user's role
+and brands and the agent verifies it like any other token. A token issued elsewhere can be passed
+with `--token` (or `RETAIL_AGENT_TOKEN`) and in the web app as `?token=...` in the URL:
+
+```bash
+TOKEN=$(python -m retail_agent --user denim_manager --print-token)
+python -m retail_agent --token "$TOKEN"
+```
+
+Tokens are HS256, valid for 8 hours, signed with `AUTH_JWT_SECRET` or, if it is not set, a local
+secret generated in `data/dev_jwt_secret`.
 
 | User | Role | Data access |
 |---|---|---|
@@ -228,7 +238,8 @@ company-wide data.
 /exit                         quit (also Ctrl+D; Ctrl+C cancels a running request)
 ```
 
-Start flags: `--user <id>`, `--continue` (your last conversation), `--resume <id>`, `--debug`.
+Start flags: `--user <id>` or `--token <jwt>`, `--print-token`, `--continue` (your last
+conversation), `--resume <id>`, `--debug`.
 
 Conversations get a short title ("Q1 2025 Monthly Revenue") after their first real question;
 it is shown in `/history` and in the web sidebar.
@@ -253,8 +264,9 @@ python -m retail_agent.web                  # http://127.0.0.1:8501, localhost o
 python -m retail_agent.web --server.port 8600
 ```
 
-The same agent as the CLI, in a browser. There is no authentication: you pick a demo user in
-the sidebar, and each browser tab has its own session for that user. The sidebar also has the
+The same agent as the CLI, in a browser. You pick a demo user in the sidebar (a token is
+issued and verified for them, as in the CLI) or open the page with `?token=<jwt>`; each browser
+tab has its own session for that user. The sidebar also has the
 conversation list (new / continue) and the system status (Gemini, BigQuery, model, LangSmith).
 
 - **Chat**: progress stages while the agent works, the trace id (and a LangSmith link when

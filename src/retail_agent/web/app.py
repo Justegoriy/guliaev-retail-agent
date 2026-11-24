@@ -9,6 +9,7 @@ from collections.abc import Callable
 
 import streamlit as st
 
+from retail_agent import auth
 from retail_agent.graph.builder import AgentSession, PendingConfirmation
 from retail_agent.observability.logger import log_event
 from retail_agent.personalization.profile import PreferenceRejected, display
@@ -58,8 +59,27 @@ def close_pending() -> None:
 def ensure_session(backend: web.Backend, user_id: str) -> AgentSession:
     if state.get("session_user") != user_id or state.get("agent") is None:
         close_pending()
-        state.agent = backend.session(backend.users[user_id])
+        state.agent = backend.sign_in(user_id)
         state.session_user = user_id
+        reset_view_state()
+    session: AgentSession = state.agent
+    web.bind_context(session)
+    return session
+
+
+def ensure_token_session(backend: web.Backend, token: str) -> AgentSession | None:
+    """Sign-in with a JWT from the page URL (`?token=...`), as a frontend would pass it."""
+    key = f"token:{hash(token)}"
+    if state.get("session_user") != key or state.get("agent") is None:
+        close_pending()
+        try:
+            state.agent = backend.sign_in_with_token(token)
+        except auth.AuthError as exc:
+            log_event("sign_in_failed", level="warning", error=type(exc).__name__)
+            st.error(f"Sign-in failed: {exc}")
+            state.agent = None
+            return None
+        state.session_user = key
         reset_view_state()
     session: AgentSession = state.agent
     web.bind_context(session)
@@ -72,6 +92,17 @@ def ensure_session(backend: web.Backend, user_id: str) -> AgentSession:
 def sidebar(backend: web.Backend) -> AgentSession | None:
     with st.sidebar:
         st.header("Retail analytics agent")
+        token = st.query_params.get("token")
+        if token:
+            session = ensure_token_session(backend, token) if backend.ready else None
+            if session is not None:
+                st.caption(
+                    f":material/key: Signed in with a token: **{session.user.name}** "
+                    f"({session.user.role}).  \nData access: {web.access_label(session.user)}"
+                )
+                conversations_panel(session)
+            status_panel(backend)
+            return session
         users = backend.users
         user_id = st.selectbox(
             "User",
@@ -81,7 +112,8 @@ def sidebar(backend: web.Backend) -> AgentSession | None:
         )
         user = users[user_id]
         st.caption(
-            f":material/lock_open: Demo without authentication.  \n"
+            f":material/key: Demo sign-in: a signed token with this user's scope is "
+            "issued and verified.  \n"
             f"Data access: {web.access_label(user)}"
         )
         session = ensure_session(backend, user_id) if backend.ready else None
@@ -367,6 +399,8 @@ def reports_view(session: AgentSession) -> None:
 def main() -> None:
     backend = get_backend()
     session = sidebar(backend)
+    if session is None and backend.ready:
+        st.stop()  # sign-in failed; the reason is already shown
     if session is None:
         st.error("The agent could not start. See *System status* in the sidebar.")
         for check in backend.checks:

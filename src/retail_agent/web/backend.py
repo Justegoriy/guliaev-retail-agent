@@ -30,7 +30,15 @@ class Backend:
     def ready(self) -> bool:
         return self.session_factory is not None
 
+    def sign_in(self, user_id: str) -> AgentSession:
+        """Demo sign-in: a token with the user's scope is issued and verified."""
+        return self.session(auth.sign_in_as(self.users[user_id], self.settings))
+
+    def sign_in_with_token(self, token: str) -> AgentSession:
+        return self.session(auth.verify_token(token, self.settings))
+
     def session(self, user: auth.UserContext) -> AgentSession:
+        """A session for a user taken from a verified token (`sign_in*`)."""
         if self.session_factory is None:
             raise RuntimeError("the agent is not available")
         logger.user_id_var.set(user.user_id)

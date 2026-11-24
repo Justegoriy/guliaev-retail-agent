@@ -107,6 +107,7 @@ def make_settings(tmp_path, **kwargs) -> Settings:
         history_keep_turns=2,
         history_summarize_after_turns=3,
         result_rows_to_llm=50,
+        dev_jwt_secret_path=tmp_path / "dev_jwt_secret",
     )
     return Settings(_env_file=None, **{**defaults, **kwargs})
 

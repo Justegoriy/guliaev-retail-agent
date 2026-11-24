@@ -212,6 +212,17 @@ model (D6). Customers are shown by id (`Customer #12345`). Customer attributes (
 Production adds BigQuery policy tags on PII columns (the agent's service account cannot read them
 at all) and Cloud DLP for free text.
 
+**Identity: a verified JWT** ([auth.py](../src/retail_agent/auth.py), D4). The frontend sends a
+JWT with `sub`, `name`, `role` and `brands`; `verify_token` checks the signature (algorithm fixed
+to HS256, so `alg: none` or a switched algorithm is refused), `iss`, `aud`, `exp` and `iat`, and
+validates the scope (a manager needs at least one brand). The resulting `UserContext` is the only
+thing the ACL filters by: a brand that is in the token but in no config file is honoured, a
+brand that is in the config but not in the token is not. The CLI and the web app play the
+frontend: `--user` and the web sidebar issue a token from `config/users.yaml` and pass it through
+the same verification; `--token`, `RETAIL_AGENT_TOKEN` and `?token=` accept an external one. In
+production the identity provider signs RS256 tokens and the agent verifies them against its JWKS,
+with the brands claim mapped from directory groups.
+
 **Each user analyses only their products.** The dataset has no link between system users and
 products, so it is introduced: brand is the only access dimension. A `manager` is assigned one or
 more brands (exact `products.brand` values, [config/users.yaml](../config/users.yaml)); the `ceo`
@@ -548,8 +559,9 @@ The client gets confirmation, preview and audit for free: the CLI and the web ap
 
 Limitations:
 
-- No real authentication: the user is chosen with `--user` or in the web sidebar (D4). One user per
-  CLI process; the web app has no login and listens on localhost only.
+- No identity provider: the prototype issues its own HS256 tokens from the access table (D4);
+  anyone who can run it can sign in as any demo user. One user per CLI process; the web app
+  listens on localhost only. Token revocation is by expiry (8 hours) only.
 - ACL is enforced by the SQL rewrite only; the BigQuery identity is the same for every user.
 - PII masking is regex-based (no DLP); an unusual PII format in free text could be missed by layer 3
   (layers 1 and 2 do not depend on it).

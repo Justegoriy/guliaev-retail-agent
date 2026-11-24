@@ -1,6 +1,7 @@
 """Command-line chat interface."""
 
 import argparse
+import os
 import sys
 from collections.abc import Callable
 
@@ -49,12 +50,27 @@ Ask a question about sales in plain language, or use a command:
 console = Console()
 
 
+TOKEN_ENV = "RETAIL_AGENT_TOKEN"
+
+
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="retail-agent", description="Chat with your retail data in plain language."
     )
+    who = parser.add_mutually_exclusive_group()
+    who.add_argument(
+        "--user",
+        help="demo sign-in: user id from config/users.yaml (e.g. ceo, denim_manager); "
+        "a token with their scope is issued and verified",
+    )
+    who.add_argument(
+        "--token",
+        help="sign in with a JWT (or set RETAIL_AGENT_TOKEN); the access scope comes from it",
+    )
     parser.add_argument(
-        "--user", help="demo user id from config/users.yaml (e.g. ceo, denim_manager)"
+        "--print-token",
+        action="store_true",
+        help="print a demo token for --user (or the chosen user) and exit",
     )
     resume = parser.add_mutually_exclusive_group()
     resume.add_argument("--resume", metavar="ID", help="continue a conversation (id or prefix)")
@@ -65,7 +81,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _choose_user(users: dict[str, auth.UserContext]) -> auth.UserContext:
+def _choose_user(users: dict[str, auth.UserContext]) -> str:
     table = Table(title="Demo users", show_lines=False)
     table.add_column("#", justify="right")
     table.add_column("id")
@@ -79,9 +95,9 @@ def _choose_user(users: dict[str, auth.UserContext]) -> auth.UserContext:
     while True:
         choice = console.input("Choose a user (number or id): ").strip()
         if choice.isdigit() and 1 <= int(choice) <= len(ordered):
-            return ordered[int(choice) - 1]
+            return ordered[int(choice) - 1].user_id
         if choice in users:
-            return users[choice]
+            return choice
         console.print(f"[red]No such user: {choice!r}[/red]")
 
 
@@ -442,6 +458,18 @@ def _start_session(user: auth.UserContext, settings: Settings) -> AgentSession |
         return None
 
 
+def _sign_in(args: argparse.Namespace, settings: Settings) -> auth.UserContext | None:
+    """The session's user, always from a verified token; None after --print-token."""
+    token = args.token or os.environ.get(TOKEN_ENV)
+    if token and not args.user and not args.print_token:
+        return auth.verify_token(token, settings)
+    user_id = args.user or _choose_user(auth.load_users())
+    if args.print_token:
+        print(auth.issue_token(auth.load_user(user_id), settings))
+        return None
+    return auth.demo_login(user_id, settings)
+
+
 def main(argv: list[str] | None = None) -> int:
     tolerate_unencodable_output()
     args = _parse_args(argv)
@@ -452,13 +480,15 @@ def main(argv: list[str] | None = None) -> int:
         console.print(f"[yellow]{tracing_status.warning}[/yellow]")
 
     try:
-        users = auth.load_users()
-        user = auth.load_user(args.user) if args.user else _choose_user(users)
-    except auth.UserConfigError as exc:
-        console.print(f"[red]{exc}[/red]")
+        user = _sign_in(args, settings)
+    except (auth.UserConfigError, auth.AuthError) as exc:
+        log_event("sign_in_failed", level="warning", error=type(exc).__name__, detail=str(exc))
+        console.print(f"[red]Sign-in failed: {exc}[/red]")
         return 2
     except (EOFError, KeyboardInterrupt):
         return 130
+    if user is None:
+        return 0  # --print-token
 
     logger.user_id_var.set(user.user_id)
     try:

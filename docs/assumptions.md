@@ -11,7 +11,7 @@ comments and the other documents.
 | D1 | **Access by brand** (confirmed by OpsFleet). Brand is the only access dimension: a `manager` manages one or more brands and analyses only those (exact `products.brand` values); the mapping is the access table [config/users.yaml](../config/users.yaml). The rewrite applies to every table, so orders, items and customers are those of the user's brands |
 | D2 | **Outside their brands, managers see nothing** (confirmed by OpsFleet): no other brands and no company-wide totals, shares or averages; only the `ceo` sees company-wide data. A question that goes beyond the user's brands is answered from what they can see, and the agent says which part is outside their access. Totals of a manager's queries are labelled as their brands' totals |
 | D3 | Only the `ceo` has access to all brands and company-wide data |
-| D4 | Users are defined in `config/users.yaml` and chosen with `--user` (or from a list, or in the web sidebar). No password: authentication is simulated. Demo users: `ceo`, `denim_manager` (Levi's, Diesel, 7 For All Mankind, True Religion), `outdoor_manager` (The North Face, Columbia, Carhartt) |
+| D4 | **Access scope from a JWT** (confirmed by OpsFleet): the frontend sends a JWT whose claims carry the user's role and brands; the agent verifies it (signature, issuer, audience, expiry) and enforces access from those claims only. In the prototype the CLI and the web app play the frontend: `--user` (or the web sidebar) issues a token from the access table `config/users.yaml` and verifies it like any other; `--token` / `RETAIL_AGENT_TOKEN` and `?token=` in the web URL accept a token issued elsewhere. HS256 with a local secret (`AUTH_JWT_SECRET` or a generated `data/dev_jwt_secret`). Demo users: `ceo`, `denim_manager` (Levi's, Diesel, 7 For All Mankind, True Religion), `outdoor_manager` (The North Face, Columbia, Carhartt) |
 | - | A brand manager sees the items of their brands, their revenue, and the orders they were part of. A mixed order counts as one order but only with its allowed items and revenue (`num_of_item` is recounted) |
 
 ## PII
@@ -51,7 +51,7 @@ comments and the other documents.
 | D25 | "Now" for relative periods ("last month") is the system date. If there is no data for a period, the agent says so and shows the available range. The public dataset is refreshed daily |
 | D26 | One user per CLI process. In the web app each browser tab picks a user; data is isolated per user as in the CLI |
 | D27 | Tests with `pytest`, lint with `ruff`, GitHub Actions run both (without network) on every push |
-| D28 | A demo web interface (Streamlit, localhost only, no authentication) in addition to the CLI, using the same agent core |
+| D28 | A demo web interface (Streamlit, localhost only) in addition to the CLI, using the same agent core; sign-in as in D4 |
 
 Revenue and order definitions used throughout: a "sale" is an order item whose status is not
 `Cancelled` or `Returned`; revenue is the sum of `sale_price` over sales; return rate is returned
@@ -71,8 +71,8 @@ items over items that were not cancelled.
 
 ## Open questions for OpsFleet
 
-1. **Authentication:** which identity provider will executives use in production (Google Workspace,
-   Okta, other)? Where does the mapping from people to brands live (directory groups)?
+1. **Identity provider:** which IdP issues the JWT in production (Google Workspace, Okta, other),
+   and which claim carries the brands? The agent expects `sub`, `role` and `brands`.
 2. **Scale and SLA (D19):** please confirm the sizing assumptions.
 3. **Model (D18):** which Gemini model and which quota tier will you test with? On a free key the
    main model's daily limit is reached quickly and the agent switches to the fallback.

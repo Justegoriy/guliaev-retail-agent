@@ -21,6 +21,7 @@ data/*.db-*
 data/golden_index.npz
 data/golden_candidates.jsonl
 data/schema_cache.json
+data/dev_jwt_secret
 exports/
 logs/
 evals/results/runs/

@@ -13,9 +13,9 @@ def test_defaults_and_path_resolution(monkeypatch):
 def test_env_overrides(monkeypatch):
     monkeypatch.setenv("MAX_SQL_FAILURES", "5")
     monkeypatch.setenv("INPUT_GUARD_LLM", "false")
-    monkeypatch.setenv("GOOGLE_API_KEY", "secret")
+    monkeypatch.setenv("GOOGLE_API_KEY", "key-value-42")
     s = Settings(_env_file=None)
     assert s.max_sql_failures == 5
     assert s.input_guard_llm is False
-    assert "secret" not in repr(s)
-    assert s.google_api_key.get_secret_value() == "secret"
+    assert "key-value-42" not in repr(s)
+    assert s.google_api_key.get_secret_value() == "key-value-42"
