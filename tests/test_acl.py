@@ -9,9 +9,8 @@ from retail_agent.safety.sql_guard import check_and_rewrite
 
 DATASET = "bigquery-public-data.thelook_ecommerce"
 CEO = UserContext("ceo", "CEO", "ceo")
-CFO = UserContext("cfo", "CFO", "c_level")
-JEANS = UserContext("jeans_manager", "Jeans manager", "executive", ("Jeans",))
-JEANS_FILTER = "category IN ('Jeans')"
+JEANS = UserContext("diesel_manager", "Diesel manager", "manager", ("Diesel",))
+JEANS_FILTER = "brand IN ('Diesel')"
 
 QUERIES = [
     "SELECT brand, COUNT(*) AS n FROM products GROUP BY brand",
@@ -22,7 +21,7 @@ QUERIES = [
     "JOIN users AS u ON o.user_id = u.id GROUP BY u.state",
     "WITH rev AS (SELECT product_id, SUM(sale_price) AS r FROM order_items GROUP BY 1) "
     "SELECT p.brand, SUM(rev.r) AS r FROM rev JOIN products p ON p.id = rev.product_id GROUP BY 1",
-    "SELECT category, COUNT(*) AS n FROM products WHERE category IN ('Jeans', 'Swim') GROUP BY 1",
+    "SELECT category, COUNT(*) AS n FROM products WHERE brand IN ('Diesel', 'Nike') GROUP BY 1",
     "SELECT * FROM orders o "
     "WHERE EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.order_id)",
     "SELECT id FROM users UNION ALL SELECT user_id FROM orders",
@@ -36,10 +35,10 @@ def guard(sql, user):
     return check_and_rewrite(sql, user, dataset=DATASET, default_limit=1000)
 
 
-def acl_selects(categories):
+def acl_selects(brands):
     """SQL of every SELECT in the ACL templates that reads a base table directly."""
     selects = set()
-    for template in acl._subqueries(DATASET, categories).values():
+    for template in acl._subqueries(DATASET, brands).values():
         for select in sqlglot.parse_one(template, read="bigquery").find_all(exp.Select):
             if isinstance(select.args["from_"].this, exp.Table):
                 selects.add(select.sql(dialect="bigquery"))
@@ -49,21 +48,20 @@ def acl_selects(categories):
 @pytest.mark.parametrize("sql", QUERIES)
 def test_every_table_is_read_only_through_acl_filter(sql):
     result = guard(sql, JEANS)
-    allowed = acl_selects(("Jeans",))
+    allowed = acl_selects(("Diesel",))
     tree = sqlglot.parse_one(result.sql, read="bigquery")
     tables = [t for t in tree.find_all(exp.Table) if t.db]  # skip CTE references
     assert tables
     for table in tables:
         enclosing = table.find_ancestor(exp.Select)
         assert enclosing.sql(dialect="bigquery") in allowed, table.sql()
-    if "Swim" not in sql:
-        assert "Swim" not in result.sql
+    if "Nike" not in sql:
+        assert "Nike" not in result.sql
 
 
-@pytest.mark.parametrize("user", [CEO, CFO])
 @pytest.mark.parametrize("sql", QUERIES)
-def test_full_access_roles_are_not_filtered(sql, user):
-    result = guard(sql, user)
+def test_ceo_is_not_filtered(sql):
+    result = guard(sql, CEO)
     assert JEANS_FILTER not in result.sql
     assert "REPLACE" not in result.sql
 
@@ -109,24 +107,25 @@ def test_orders_num_of_item_counts_only_allowed_items():
     assert "COUNT(*) AS num_of_item" in orders.sql(dialect="bigquery")
 
 
-def test_multiple_categories_with_special_characters():
-    user = UserContext("x", "X", "executive", ("Outerwear & Coats", "Blazers & Jackets"))
-    sql = guard("SELECT id FROM products", user).sql
-    assert "category IN ('Blazers & Jackets', 'Outerwear & Coats')" in sql
+def test_multiple_brands_with_special_characters():
+    user = UserContext("x", "X", "manager", ("Levi's", "7 For All Mankind", "Ben & Jerry"))
+    tree = sqlglot.parse_one(guard("SELECT id FROM products", user).sql, read="bigquery")
+    where = tree.args["from_"].this.this.args["where"].this
+    assert [e.this for e in where.expressions] == ["7 For All Mankind", "Ben & Jerry", "Levi's"]
 
 
-def test_category_literal_cannot_inject_sql():
-    rogue = UserContext("x", "X", "executive", ("Jeans') OR TRUE --",))
+def test_brand_literal_cannot_inject_sql():
+    rogue = UserContext("x", "X", "manager", ("Diesel') OR TRUE --",))
     sql = guard("SELECT id FROM products", rogue).sql
     tree = sqlglot.parse_one(sql, read="bigquery")
     where = tree.args["from_"].this.this.args["where"].this
     assert isinstance(where, exp.In)
-    assert [e.this for e in where.expressions] == ["Jeans') OR TRUE --"]
+    assert [e.this for e in where.expressions] == ["Diesel') OR TRUE --"]
 
 
 def test_empty_scope_is_rejected():
     with pytest.raises(SqlRejected):
-        guard("SELECT id FROM products", UserContext("x", "X", "executive", ()))
+        guard("SELECT id FROM products", UserContext("x", "X", "manager", ()))
 
 
 def bq_runner():
@@ -136,27 +135,22 @@ def bq_runner():
     return BigQueryRunner.from_settings(get_settings())
 
 
-def test_category_group_expands_to_its_categories():
-    from retail_agent.auth import load_user
-
-    sql = guard("SELECT id FROM products", load_user("bottoms_manager")).sql
-    assert "category IN ('Jeans', 'Leggings', 'Pants', 'Pants & Capris', 'Shorts', 'Skirts')" in sql
-
-
 @pytest.mark.network
-def test_group_manager_sees_only_group_categories_in_bigquery():
+@pytest.mark.parametrize("user_id", ["denim_manager", "outdoor_manager"])
+def test_manager_sees_exactly_their_brands_in_bigquery(user_id):
     from retail_agent.auth import load_user
 
-    user = load_user("bottoms_manager")
+    user = load_user(user_id)
     runner = bq_runner()
     queries = [
-        "SELECT DISTINCT category FROM products",
-        "SELECT DISTINCT p.category FROM order_items oi "
+        "SELECT DISTINCT brand FROM products",
+        "SELECT DISTINCT p.brand FROM order_items oi "
         "JOIN `bigquery-public-data.thelook_ecommerce.products` p ON p.id = oi.product_id",
     ]
     for sql in queries:
-        assert set(runner.execute(guard(sql, user).sql).df["category"]) == set(user.categories)
-    rewritten = guard("SELECT COUNT(*) AS n FROM products WHERE category = 'Swim'", user)
+        # Equality also catches a misspelt brand in users.yaml (it would match nothing).
+        assert set(runner.execute(guard(sql, user).sql).df["brand"]) == set(user.brands)
+    rewritten = guard("SELECT COUNT(*) AS n FROM products WHERE brand = 'Nike'", user)
     assert int(runner.execute(rewritten.sql).df["n"][0]) == 0
 
 

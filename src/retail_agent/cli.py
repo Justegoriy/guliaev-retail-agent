@@ -54,7 +54,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         prog="retail-agent", description="Chat with your retail data in plain language."
     )
     parser.add_argument(
-        "--user", help="demo user id from config/users.yaml (e.g. ceo, bottoms_manager)"
+        "--user", help="demo user id from config/users.yaml (e.g. ceo, denim_manager)"
     )
     resume = parser.add_mutually_exclusive_group()
     resume.add_argument("--resume", metavar="ID", help="continue a conversation (id or prefix)")
@@ -409,8 +409,6 @@ def _banner(
 ) -> None:
     user = session.user
     access = user.scope_label
-    if user.categories:
-        access += f" ({', '.join(user.categories)})"
     trace_line = f"on (project {settings.langsmith_project})" if langsmith.enabled else "off"
     conversation = "resumed" if resumed else "new"
     lines = [
@@ -482,8 +480,7 @@ def main(argv: list[str] | None = None) -> int:
     log_event(
         "session_start",
         role=user.role,
-        category_groups=list(user.category_groups),
-        categories=list(user.categories),
+        brands=list(user.brands),
         langsmith=tracing_status.enabled,
         resumed=resumed is not None,
     )

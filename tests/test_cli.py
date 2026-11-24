@@ -174,7 +174,7 @@ def test_history_resume_and_new(h, run, capsys):
 
 
 def test_resume_of_another_users_conversation_is_refused(h, run, capsys):
-    h.storage.record_turn("someone-elses", "bottoms_manager", "secret")
+    h.storage.record_turn("someone-elses", "denim_manager", "secret")
     run(h, "/resume someone-elses")
     assert "belongs to another user" in capsys.readouterr().out
     assert h.session.conversation_id != "someone-elses"
@@ -192,7 +192,7 @@ def test_trace_and_stats_commands(h, run, capsys):
 
 
 def test_stats_all_needs_full_access(tmp_path, run, capsys):
-    manager = UserContext("bottoms_manager", "Bob", "executive", categories=("Jeans",))
+    manager = UserContext("denim_manager", "Bob", "manager", brands=("Diesel",))
     try:
         run(make_harness(tmp_path, manager), "/stats all")
     finally:

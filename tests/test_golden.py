@@ -117,7 +117,7 @@ def test_seed_trios_are_valid():
         assert topic in ids
 
 
-@pytest.mark.parametrize("user_id", ["ceo", "bottoms_manager"])
+@pytest.mark.parametrize("user_id", ["ceo", "denim_manager"])
 def test_seed_sql_passes_the_guard(user_id):
     user = auth.load_user(user_id)
     for t in load_trios(TRIOS_FILE):

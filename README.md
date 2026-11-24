@@ -5,7 +5,7 @@ sales, customers and products in plain English, discuss the results, and get rep
 items. The agent writes and runs SQL against the BigQuery public dataset
 `bigquery-public-data.thelook_ecommerce` (`orders`, `order_items`, `products`, `users`). It uses
 analysts' past work (the "Golden Bucket") to interpret questions, never shows personal data,
-limits each user to their own product categories, and deletes saved reports only after a strict
+limits each user to their own brands, and deletes saved reports only after a strict
 confirmation.
 
 - **Design:** [docs/architecture.md](docs/architecture.md) (HLD, diagrams, services, data
@@ -83,14 +83,14 @@ Optional checks: `python scripts/check_bigquery.py`, `python scripts/check_llm.p
 
 ## Example session
 
-Real output of the CLI (`--user ceo`, then `--user bottoms_manager`), shortened only where marked.
+Real output of the CLI (`--user ceo`, then `--user denim_manager`), shortened only where marked.
 
 ```text
 ✓ Gemini key OK (gemini-3.8-flash)
 ✓ BigQuery OK (bigquery-public-data.thelook_ecommerce)
 ┌────────────────────────────── Retail analytics agent ──────────────────────────────┐
 │ Alice Morgan (ceo), role: ceo                                                      │
-│ Data access: all categories                                                        │
+│ Data access: all brands                                                            │
 │ Model: gemini-3.8-flash, fallback gemini-3.5-flash-lite, aux gemini-3.5-flash-lite │
 │ LangSmith tracing: on (project retail-agent)                                       │
 │ Conversation: 377161ca (new)                                                       │
@@ -151,19 +151,34 @@ rules. Ask me a question about sales, products or customers.
 trace: 99a006c87b334fce
 ```
 
-A category manager asking about a category outside their access (`--user bottoms_manager`):
+A brand manager asking about their brands, then about a brand outside their access
+(`--user denim_manager`):
 
 ```text
-│ Carlos Ruiz (bottoms_manager), role: executive                                     │
-│ Data access: Bottoms (Jeans, Pants, Pants & Capris, Shorts, Skirts, Leggings)      │
+│ Carlos Ruiz (denim_manager), role: manager                                  │
+│ Data access: Levi's, Diesel, 7 For All Mankind, True Religion               │
 
-you> Revenue of the Swim category by brand in 2024
-The Swim category is outside your data access (Bottoms: Jeans, Pants, Pants & Capris, Shorts,
-Skirts, Leggings).
+you> Revenue by brand in 2024
+Diesel led your brands with USD 24,974 in revenue in 2024, followed by True
+Religion at USD 21,409.
+[... metric definitions ...]
+ Brand            Revenue (USD)  Orders  Units Sold  Margin (USD)
+ ───────────────────────────────────────────────────────────────
+ Diesel           24,974         186     186         12,448
+ True Religion    21,409         114     114         10,195
+ 7 For All        19,545         119     120         9,424
+ Mankind
+ Levi's           8,855          174     176         4,361
 
-For context, total company-wide revenue in 2024 across all categories was $1,200,914. Details by
-brand or category outside your access are restricted.
-trace: e39f5b5fb487419c
+Total revenue across your four accessible brands in 2024 was USD 74,783.
+trace: 909b9998000d4c54
+you> Revenue of Nike products in 2024
+Nike is outside your brand access (your accessible brands are Diesel, True
+Religion, 7 For All Mankind, and Levi's), so detailed product-level figures for
+Nike are not available.
+
+Company-wide total revenue across all brands in 2024 was USD 1,187,556.
+trace: 0be2e0518c414616
 ```
 
 Deleting a report: the agent saved "Q1 2025 Sales Review and Q2 Action Plan"; on "Delete the report
@@ -197,12 +212,13 @@ authentication.
 
 | User | Role | Data access |
 |---|---|---|
-| `ceo` (Alice Morgan) | ceo | All categories |
-| `cfo` (Brian Chen) | c_level | All categories |
-| `bottoms_manager` (Carlos Ruiz) | executive | Bottoms: Jeans, Pants, Pants & Capris, Shorts, Skirts, Leggings |
-| `outerwear_manager` (Diana Novak) | executive | Outerwear & Tailoring: Outerwear & Coats, Blazers & Jackets, Suits & Sport Coats, Suits |
+| `ceo` (Alice Morgan) | ceo | All brands |
+| `denim_manager` (Carlos Ruiz) | manager | Levi's, Diesel, 7 For All Mankind, True Religion |
+| `outdoor_manager` (Diana Novak) | manager | The North Face, Columbia, Carhartt |
 
-Outside their categories, managers get only company-wide totals without any breakdown.
+Brand is the only access dimension: a manager analyses only their brands (exact
+`products.brand` values). Outside their brands, managers get only company-wide totals without
+any breakdown.
 
 ## CLI commands
 
@@ -268,8 +284,8 @@ are in [docs/technical_design.md](docs/technical_design.md)):
   requests. A SQL Guard parses every query: one read-only statement, only the four tables, no
   personal fields in the output (including `SELECT *`, aliases, expressions), a LIMIT. Results
   and answers are masked again, as are logs and traces. Customers appear only by id. Access to
-  categories is enforced by rewriting every table in the query into a filtered subquery, so no
-  query can see another category's rows.
+  brands is enforced by rewriting every table in the query into a filtered subquery, so no
+  query can see another brand's rows.
 - **High-stakes oversight.** Reports are deleted only through a tool that finds the user's own
   matching reports, pauses the conversation and asks the user (`[y/N]` or buttons). The exact set
   shown is deleted; if it changed, nothing is deleted. Soft delete plus an audit log. The same
@@ -310,7 +326,7 @@ python evals/run_eval.py --case a2_top_categories --no-judge
 
 Cases are in [evals/cases.yaml](evals/cases.yaml): structure, analytics, report, security,
 resilience, personalization, multi-turn and deletion. Each case is checked three ways:
-deterministic checks (refusal, tools called, no PII, no rows outside the user's categories, answer
+deterministic checks (refusal, tools called, no PII, no rows outside the user's brands, answer
 format), execution accuracy (numbers from a reference SQL must appear in the answer) and an LLM
 judge (intent, grounded in data, format, action items). Each run uses its own databases, so it
 does not touch your reports or preferences, and writes `evals/results/<timestamp>.json`. A full
@@ -353,7 +369,7 @@ each one. The ones you are most likely to change:
 | `LOG_LLM_PAYLOADS` | `true` | Write full model conversations for `/trace --full` |
 
 Non-developer settings live in [config/](config/): `persona.md` (tone, re-read every turn),
-`glossary.yaml` (metric definitions), `users.yaml` (users and category groups), `pii_policy.yaml`
+`glossary.yaml` (metric definitions), `users.yaml` (users and their brands), `pii_policy.yaml`
 (personal fields and patterns), `preferences.yaml` (allowed preference keys and thresholds).
 
 Data files are created on first run: `data/app.db` (reports, conversations, preferences, audit),

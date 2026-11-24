@@ -5,7 +5,7 @@ from harness import CEO, REVENUE_SQL, Harness, calls, tool_call
 from retail_agent.auth import UserContext
 from retail_agent.data.storage import ConversationAccessError
 
-BOB = UserContext("bob", "Bob", "c_level")
+BOB = UserContext("bob", "Bob", "ceo")
 EMAIL = "john.doe@example.com"
 
 

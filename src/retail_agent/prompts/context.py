@@ -128,11 +128,11 @@ class PromptInputs:
 
 def user_block(user: UserContext) -> str:
     if user.has_full_access:
-        access = "all product categories"
+        access = "all brands"
     else:
         access = (
-            f"{user.scope_label} (products.category: {', '.join(user.categories)}). "
-            "Other categories: only company-wide totals via get_company_benchmark"
+            f"brands {user.scope_label} (products.brand). "
+            "Other brands: only company-wide totals via get_company_benchmark"
         )
     return f"Name: {user.name}\nRole: {user.role}\nData access: {access}"
 

@@ -101,10 +101,10 @@ def numeric_summary(df: pd.DataFrame) -> str:
 def access_note(ctx: ToolContext) -> str:
     user = ctx.user
     if user.has_full_access:
-        return "Your data access: all product categories."
+        return "Your data access: all brands."
     return (
-        f"Your data access: {user.scope_label} (categories: {', '.join(user.categories)}). "
-        "For other categories only company-wide totals are available, without any breakdown."
+        f"Your data access: brands {user.scope_label}. "
+        "For other brands only company-wide totals are available, without any breakdown."
     )
 
 
@@ -121,7 +121,7 @@ def _describe_dataset(ctx: ToolContext) -> BaseTool:
         name="describe_dataset",
         description=(
             "Describe the available data for the user: tables, fields, relationships, "
-            "example questions and which product categories the user can access. "
+            "example questions and which brands the user can access. "
             "Use when the user asks what data or analyses are available."
         ),
     )
@@ -220,7 +220,7 @@ def _run_sql(ctx: ToolContext) -> BaseTool:
     scope = (
         ""
         if ctx.user.has_full_access
-        else " Results are automatically restricted to the product categories the user can "
+        else " Results are automatically restricted to the brands the user can "
         "access; do not try to work around it."
     )
     return StructuredTool.from_function(
@@ -317,7 +317,7 @@ def _get_company_benchmark(ctx: ToolContext) -> BaseTool:
             ExecutedQuery(sql=sql, purpose=purpose, rows=len(df), columns=(), source="benchmark")
         )
         header = (
-            f"OK: company-wide {metric} (all categories, anonymized totals), "
+            f"OK: company-wide {metric} (all brands, anonymized totals), "
             f"{start_date.isoformat()}..{end_date.isoformat()}.\n"
             f"Definition: {METRIC_DEFINITIONS[metric]}."
         )
@@ -335,8 +335,8 @@ def _get_company_benchmark(ctx: ToolContext) -> BaseTool:
         name="get_company_benchmark",
         description=(
             "Company-wide anonymized totals for benchmarking; no breakdown by category, "
-            "product, brand or customer. Covers all categories, including those outside "
-            "the user's access. Use to compare the user's categories with the whole "
+            "product, brand or customer. Covers all brands, including those outside "
+            "the user's access. Use to compare the user's brands with the whole "
             "company, or when the user asks about data outside their access."
         ),
         args_schema=BenchmarkArgs,

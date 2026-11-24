@@ -1,7 +1,7 @@
 """SQL Guard: every query the LLM writes passes through `check_and_rewrite` before BigQuery.
 
 Checks: single read-only statement, whitelisted tables only, no PII in query output (D6).
-Rewrites: fully-qualified table names, category ACL (T4), mandatory outer LIMIT.
+Rewrites: fully-qualified table names, brand ACL (T4), mandatory outer LIMIT.
 Rejections raise `SqlRejected` with a message addressed to the LLM so it can fix the query.
 """
 

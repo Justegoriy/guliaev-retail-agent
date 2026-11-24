@@ -17,9 +17,9 @@ EVENTS = [
     ev("fallback_used", "t1", reason="cooldown"),
     ev("fallback_used", "t1", reason="cooldown"),
     ev("turn_end", "t1", status="error", error_kind="sql_failed"),
-    ev("turn_start", "t2", user="bottoms_manager"),
-    ev("sql_rejected", "t2", user="bottoms_manager", rule="pii_projection"),
-    ev("turn_end", "t2", user="bottoms_manager", status="ok"),
+    ev("turn_start", "t2", user="denim_manager"),
+    ev("sql_rejected", "t2", user="denim_manager", rule="pii_projection"),
+    ev("turn_end", "t2", user="denim_manager", status="ok"),
     ev("turn_start", "t3"),
     ev("guard_blocked", "t3", category="off_topic", reason="poem"),
     ev("turn_end", "t3", status="blocked"),
@@ -65,7 +65,7 @@ def test_problems_are_grouped_and_turns_ranked():
 
 def test_filters_by_period_and_user():
     since = datetime(2026, 11, 10, tzinfo=UTC)
-    report = failures.analyze(EVENTS, since=since, user_id="bottoms_manager")
+    report = failures.analyze(EVENTS, since=since, user_id="denim_manager")
     assert report.turns == 1
     assert [t.trace_id for t in report.problem_turns] == ["t2"]
 

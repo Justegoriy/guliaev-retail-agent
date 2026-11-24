@@ -25,7 +25,7 @@ ORDER_STATUSES = "Processing, Shipped, Complete, Returned, Cancelled"
 TABLE_PURPOSE = {
     "orders": "One row per customer order.",
     "order_items": "One row per item sold; the source of revenue.",
-    "products": "Product catalogue; `category` defines data access.",
+    "products": "Product catalogue; `brand` defines data access.",
     "users": "Customers. Contains PII.",
 }
 
@@ -39,7 +39,7 @@ COLUMN_NOTES: dict[str, dict[str, str]] = {
         "returned_at": "NULL unless returned",
         "shipped_at": "NULL until shipped",
         "delivered_at": "NULL until delivered",
-        "num_of_item": "number of items in the order (for category managers: only their items)",
+        "num_of_item": "number of items in the order (for brand managers: only their items)",
     },
     "order_items": {
         "id": "primary key",
@@ -54,9 +54,9 @@ COLUMN_NOTES: dict[str, dict[str, str]] = {
     "products": {
         "id": "primary key",
         "cost": "unit cost to the company, USD; margin = sale_price - cost",
-        "category": "product category (26 values, e.g. Jeans, Swim, Accessories); access scope",
+        "category": "product category (26 values, e.g. Jeans, Swim, Accessories)",
         "name": "product name",
-        "brand": "brand name",
+        "brand": "brand name; access scope (exact, case-sensitive)",
         "retail_price": "list price, USD",
         "department": "Men or Women",
         "sku": "stock keeping unit",

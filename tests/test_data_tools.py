@@ -19,7 +19,7 @@ from retail_agent.tools.data_tools import STOP_MESSAGE, benchmark_sql
 
 DATASET = "bigquery-public-data.thelook_ecommerce"
 CEO = UserContext("ceo", "Alice", "ceo")
-JEANS = UserContext("jeans", "Carlos", "executive", ("Jeans",), extra_categories=("Jeans",))
+JEANS = UserContext("diesel", "Carlos", "manager", ("Diesel",))
 GOOD_SQL = "SELECT status, COUNT(*) AS n FROM orders GROUP BY status"
 
 
@@ -96,7 +96,7 @@ def test_success_returns_csv_and_records_guarded_sql():
 def test_restricted_user_query_is_acl_filtered():
     ctx = make_ctx(user=JEANS)
     run_sql(ctx, "SELECT COUNT(*) AS n FROM products")
-    assert "category IN ('Jeans')" in ctx.runner.execute.call_args.args[0]
+    assert "brand IN ('Diesel')" in ctx.runner.execute.call_args.args[0]
 
 
 def test_rejected_query_is_not_sent_to_bigquery():
@@ -222,9 +222,9 @@ def test_pii_in_result_values_is_masked():
 def test_describe_dataset_hides_pii_and_shows_access():
     full = tools_by_name(make_ctx())["describe_dataset"].invoke({})
     assert "Personal data (email) is never shown." in full
-    assert "all product categories" in full
+    assert "all brands" in full
     restricted = tools_by_name(make_ctx(user=JEANS))["describe_dataset"].invoke({})
-    assert "categories: Jeans" in restricted
+    assert "brands Diesel" in restricted
     assert "company-wide totals" in restricted
 
 
@@ -239,7 +239,7 @@ def benchmark(ctx: ToolContext, **args) -> str:
 def test_benchmark_total_ignores_acl():
     ctx = make_ctx(user=JEANS, df=pd.DataFrame({"revenue": [1234567.891], "orders": [10]}))
     out = benchmark(ctx)
-    assert out.startswith("OK: company-wide revenue (all categories, anonymized totals)")
+    assert out.startswith("OK: company-wide revenue (all brands, anonymized totals)")
     assert "2024-01-01..2024-12-31" in out
     assert "Definition: SUM(order_items.sale_price)" in out
     assert out.endswith("revenue=1234567.89")
@@ -301,7 +301,7 @@ def dummy_factory(name):
 
 
 def test_data_tools_available_to_every_role():
-    for user in (CEO, JEANS, UserContext("cfo", "Brian", "c_level")):
+    for user in (CEO, JEANS):
         names = {s.name for s in REGISTRY.specs_for(user)}
         assert {"describe_dataset", "run_sql", "get_company_benchmark"} <= names
 

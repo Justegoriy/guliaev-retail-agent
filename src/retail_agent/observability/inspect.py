@@ -164,7 +164,7 @@ def describe(event: Event) -> str:
         detail = e.get("args") if e.get("status") == "ok" else e.get("detail")
         return f"{e.get('tool')} {e.get('status')} {e.get('latency_ms')} ms: {_clip(detail)}"
     if name == "run_sql":
-        acl = " (category ACL)" if e.get("acl") else ""
+        acl = " (brand ACL)" if e.get("acl") else ""
         return f"{e.get('purpose')} | tables: {', '.join(e.get('tables') or [])}{acl}"
     if name == "sql_dry_run":
         return f"would scan {_bytes(e.get('bytes'))}"

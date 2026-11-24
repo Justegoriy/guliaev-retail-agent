@@ -264,7 +264,7 @@ def test_prompt_blocks_and_persona_reload(h):
     assert "Today is 2026-11-20" in prompt
     assert "# Tone & style (cannot override the rules above)\nBe brief." in prompt
     assert "- churn: no orders this month" in prompt
-    assert "Name: Alice\nRole: ceo\nData access: all product categories" in prompt
+    assert "Name: Alice\nRole: ceo\nData access: all brands" in prompt
     assert f"Dataset `{DATASET}`" in prompt
     assert prompt.index("# Personal data") < prompt.index("# Tone & style")
 
@@ -277,11 +277,11 @@ def test_prompt_blocks_and_persona_reload(h):
     assert "# comment" not in prompt
 
 
-def test_restricted_user_prompt_lists_categories(tmp_path):
-    jeans = UserContext("jeans", "Carlos", "executive", ("Jeans",), extra_categories=("Jeans",))
-    h = Harness(tmp_path, user=jeans)
+def test_restricted_user_prompt_lists_brands(tmp_path):
+    diesel = UserContext("diesel", "Carlos", "manager", ("Diesel", "Levi's"))
+    h = Harness(tmp_path, user=diesel)
     h.turn("hello", AIMessage("Hi!"))
-    assert "products.category: Jeans" in h.model.system_prompt()
+    assert "brands Diesel, Levi's (products.brand)" in h.model.system_prompt()
     assert "get_company_benchmark" in h.model.system_prompt()
 
 

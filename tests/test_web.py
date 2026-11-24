@@ -16,7 +16,7 @@ from retail_agent.observability.tracing import TracingStatus
 from retail_agent.web import backend as web
 
 APP = Path(__file__).resolve().parents[1] / "src" / "retail_agent" / "web" / "app.py"
-BOB = UserContext("bob", "Bob", "c_level")
+BOB = UserContext("bob", "Bob", "ceo")
 TIMEOUT = 30
 
 

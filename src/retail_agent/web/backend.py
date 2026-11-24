@@ -39,8 +39,7 @@ class Backend:
         log_event(
             "session_start",
             role=user.role,
-            category_groups=list(user.category_groups),
-            categories=list(user.categories),
+            brands=list(user.brands),
             langsmith=self.langsmith.enabled,
             resumed=False,
             client="web",
@@ -83,10 +82,7 @@ def transcript(session: AgentSession) -> list[tuple[str, str]]:
 
 
 def access_label(user: auth.UserContext) -> str:
-    label = user.scope_label
-    if user.categories:
-        label += f" ({', '.join(user.categories)})"
-    return label
+    return user.scope_label
 
 
 def langsmith_url(settings: Settings, trace_id: str) -> str | None:

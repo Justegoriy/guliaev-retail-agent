@@ -2,7 +2,7 @@
 
     python scripts/failure_report.py                 # all of logs/agent.jsonl
     python scripts/failure_report.py --days 7 --top 20
-    python scripts/failure_report.py --user bottoms_manager
+    python scripts/failure_report.py --user denim_manager
     python scripts/failure_report.py --log evals/results/runs/<ts>/agent.jsonl
 
 Counts failed turns, SQL errors by type, exhausted SQL attempts, SQL Guard rejections,

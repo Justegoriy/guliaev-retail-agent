@@ -196,25 +196,25 @@ Production adds BigQuery policy tags on PII columns (the agent's service account
 at all) and Cloud DLP for free text.
 
 **Each user analyses only their products.** The dataset has no link between system users and
-products, so it is introduced: the 26 product categories are grouped into 8 category groups
-([config/users.yaml](../config/users.yaml)); a manager is assigned groups (and optionally single
-categories); `ceo` and `c_level` have full access (D1 to D3).
+products, so it is introduced: brand is the only access dimension. A `manager` is assigned one or
+more brands (exact `products.brand` values, [config/users.yaml](../config/users.yaml)); the `ceo`
+has full access (D1 to D3).
 
 - Enforcement is a rewrite, not a check ([safety/acl.py](../src/retail_agent/safety/acl.py)). For
   a restricted user every table reference in the model's SQL is replaced with a filtered subquery
-  that keeps the alias: `products` keeps only allowed categories; `order_items` only items of those
+  that keeps the alias: `products` keeps only allowed brands; `order_items` only items of those
   products; `orders` only orders containing allowed items, with `num_of_item` recounted over them
-  (about 29% of orders mix categories; without the recount other categories' item counts would
-  leak); `users` only customers who bought allowed products. Whatever SQL the model writes, it can
+  (about 30% of orders mix brands; without the recount other brands' item counts would leak); `users` only customers who bought allowed products. Whatever SQL the model writes, it can
   only see the user's rows. Rejecting queries "without the right WHERE" was rejected as a design:
   the model would fail often, adding retries and cost.
 - Outside their scope users get only anonymised company-wide totals through
   `get_company_benchmark` (fixed SQL templates, the model writes no SQL; revenue, orders, AOV,
   customers, items sold, return rate; total or monthly; no breakdown by category, product, brand
-  or customer). So "my categories vs the company" works, a breakdown of other categories does not.
-- Verified on BigQuery: `bottoms_manager` sees exactly the 6 categories of the Bottoms group; for
-  Jeans, `orders` and `order_items` give the same 12,093 orders and 12,450 items.
-- Production: BigQuery row access policies per category group (granted to directory groups), so
+  or customer). So "my brands vs the company" works, a breakdown of other brands does not.
+- Verified on BigQuery: each demo manager sees exactly their brands (this also catches a
+  misspelt brand in the config, which would match nothing); for `denim_manager`, `orders` and
+  `order_items` give the same 4,960 orders and 5,019 items.
+- Production: BigQuery row access policies per brand scope (granted to directory groups), so
   the rewrite and the database enforce the same rule.
 
 **SQL execution safety.** One statement, `SELECT`/`WITH` only, only the four tables of the
@@ -342,7 +342,7 @@ idempotent handlers.
   security, resilience, personalization, multi-turn, deletion). Each case can set the user, a
   pre-filled profile, saved reports and several turns. Three layers:
   1. deterministic checks: refusal, tools called or not called, SQL executed and its content,
-     answer contains / does not contain, PII regexes, no rows from categories outside the user's
+     answer contains / does not contain, PII regexes, no rows from brands outside the user's
      scope, format (table, bullets, prose), length, confirmation requested;
   2. execution accuracy: the case's reference SQL is executed and its key numbers must appear in
      the answer (1% tolerance);
@@ -352,7 +352,7 @@ idempotent handlers.
   Each run uses its own databases and log, writes `evals/results/<timestamp>.json` with commit,
   models, tokens and per-category results, and supports `--only <category>` and `--case <id>`.
 - *Security red team* is part of the eval: PII extraction, prompt injection, off-topic, `DROP` and
-  `DELETE`, another category's data, ACL through a follow-up, PII through a preference. The bar is
+  `DELETE`, another brand's data, ACL through a follow-up, PII through a preference. The bar is
   100%.
 - *Gate*: CI runs lint and unit tests on every push; in production the eval (security 100%, no
   regression in pass rate, judge mean or accuracy against the last release) gates the deploy,
@@ -451,7 +451,7 @@ trace sampling for weekly manual review.
 | Empty result (typo in a state name) | `EMPTY` with advice; the model checks distinct values and fixes the filter | The answer, or "no data for X; available values are ..." |
 | Query too expensive | Refused at dry run (2 GB per query, 10 GB per turn); the model narrows or aggregates | The answer, or an explanation |
 | PII requested | Guard flag + SQL Guard rejection + masking | Customers by id; "personal data is not available" |
-| Other category's data | ACL rewrite returns only allowed rows; benchmark for company totals | Totals for the company, no breakdown |
+| Other brand's data | ACL rewrite returns only allowed rows; benchmark for company totals | Totals for the company, no breakdown |
 | Per-minute 429 / 5xx from Gemini | Retries within 30 s, then fallback model | A normal answer, a bit slower |
 | Daily quota on the main model | No retries, fallback at once, main model marked exhausted | A normal answer |
 | Main model overloaded repeatedly | 5-minute cooldown, fallback answers directly | A normal answer |

@@ -1,62 +1,18 @@
-# Demo users for the prototype (D4). In production identity comes from SSO,
-# and role/access scope from the corporate directory.
+# Demo users for the prototype (D1, D4). In production identity and access scope come
+# from the JWT the frontend sends; this file plays the role of the access table.
 #
-# role:
-#   ceo, c_level - full access to all product categories
-#   executive    - product manager: access only to the listed `category_groups`
-#                  (and optionally individual `categories`); everything else is
-#                  visible only as anonymised company-wide aggregates
+# Brand is the only access dimension:
+#   ceo     - all brands, company-wide data
+#   manager - only the listed `brands` (exact `products.brand` values, case-sensitive)
 users:
   ceo:
     name: Alice Morgan
     role: ceo
-  cfo:
-    name: Brian Chen
-    role: c_level
-  bottoms_manager:
+  denim_manager:
     name: Carlos Ruiz
-    role: executive
-    category_groups: [Bottoms]
-  outerwear_manager:
+    role: manager
+    brands: [Levi's, Diesel, 7 For All Mankind, True Religion]
+  outdoor_manager:
     name: Diana Novak
-    role: executive
-    category_groups: [Outerwear & Tailoring]
-
-# Product category groups -> products.category values (26 categories, checked 2026-11-19).
-# Every category belongs to exactly one group; this is also the list of valid categories,
-# so a typo in a user's scope fails at start-up instead of silently granting nothing.
-category_groups:
-  Outerwear & Tailoring:
-    - Outerwear & Coats
-    - Blazers & Jackets
-    - Suits & Sport Coats
-    - Suits
-  Tops:
-    - Tops & Tees
-    - Sweaters
-    - Fashion Hoodies & Sweatshirts
-  Bottoms:
-    - Jeans
-    - Pants
-    - Pants & Capris
-    - Shorts
-    - Skirts
-    - Leggings
-  Dresses & Sets:
-    - Dresses
-    - Jumpsuits & Rompers
-    - Clothing Sets
-  Underwear & Loungewear:
-    - Intimates
-    - Underwear
-    - Socks
-    - Socks & Hosiery
-    - Sleep & Lounge
-  Active & Swim:
-    - Active
-    - Swim
-  Special Sizes:
-    - Maternity
-    - Plus
-  Accessories:
-    - Accessories
+    role: manager
+    brands: [The North Face, Columbia, Carhartt]
