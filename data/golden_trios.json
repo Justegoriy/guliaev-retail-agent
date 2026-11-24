@@ -20,8 +20,8 @@
   {
     "id": "top_customers",
     "question": "Who are our top 10 customers by revenue in the last 12 months?",
-    "sql": "SELECT\n  oi.user_id AS customer_id,\n  u.country,\n  u.traffic_source,\n  COUNT(DISTINCT oi.order_id) AS orders,\n  ROUND(SUM(oi.sale_price), 2) AS revenue,\n  MIN(DATE(oi.created_at)) AS first_order_in_period,\n  MAX(DATE(oi.created_at)) AS last_order_in_period\nFROM `bigquery-public-data.thelook_ecommerce.order_items` oi\nJOIN `bigquery-public-data.thelook_ecommerce.users` u ON u.id = oi.user_id\nWHERE oi.status NOT IN ('Cancelled', 'Returned')\n  AND DATE(oi.created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)\nGROUP BY customer_id, u.country, u.traffic_source\nORDER BY revenue DESC\nLIMIT 10",
-    "report": "Customers are identified only by users.id, never by name or e-mail. Rank by revenue of sold items over a rolling 12 months and add orders, country, acquisition channel and first/last order date, which explain the ranking. Note how concentrated revenue is (share of the top 10 in total revenue needs a second query) and whether the top customers are recent or long-standing.",
+    "sql": "SELECT\n  oi.user_id AS customer_id,\n  COUNT(DISTINCT oi.order_id) AS orders,\n  ROUND(SUM(oi.sale_price), 2) AS revenue,\n  MIN(DATE(oi.created_at)) AS first_order_in_period,\n  MAX(DATE(oi.created_at)) AS last_order_in_period\nFROM `bigquery-public-data.thelook_ecommerce.order_items` oi\nWHERE oi.status NOT IN ('Cancelled', 'Returned')\n  AND DATE(oi.created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)\nGROUP BY customer_id\nORDER BY revenue DESC\nLIMIT 10",
+    "report": "Customers are identified only by users.id, never by name or e-mail. Rank by revenue of sold items over a rolling 12 months and add orders and first/last order date, which explain the ranking. Customer attributes (country, channel, age, gender) are never shown next to a customer id: to describe the top customers, aggregate them as a group (e.g. top-100 customers by country) in a separate query. Note how concentrated revenue is (share of the top 10 in total revenue needs a second query) and whether the top customers are recent or long-standing.",
     "tags": [
       "customers",
       "top customers",
@@ -31,8 +31,7 @@
       "loyalty"
     ],
     "tables": [
-      "order_items",
-      "users"
+      "order_items"
     ],
     "status": "approved"
   },

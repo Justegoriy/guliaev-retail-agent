@@ -175,8 +175,9 @@ on the prompt alone:
 
 **PII.** Fields: `first_name`, `last_name`, `email`, `street_address`, `postal_code`, `latitude`,
 `longitude`, `user_geom` ([config/pii_policy.yaml](../config/pii_policy.yaml)). PII may be used
-inside SQL (joins, filters, `COUNT(DISTINCT email)`) but is never stored or shown (D6). Customers
-are shown by id (`Customer #12345`). Three layers:
+inside SQL (joins, filters, `COUNT(DISTINCT email)`) but is never stored, shown or passed to the
+model (D6). Customers are shown by id (`Customer #12345`). Customer attributes (`age`, `gender`,
+`city`, `state`, `country`, `traffic_source`) may be shown only in aggregates (D7). Three layers:
 
 1. **SQL Guard** ([safety/sql_guard.py](../src/retail_agent/safety/sql_guard.py)) rejects PII in
    any final projection: direct columns, aliases, `CONCAT(first_name, ...)`, `SELECT *` over
@@ -184,9 +185,25 @@ are shown by id (`Customer #12345`). Three layers:
    aggregate functions over PII. Allowed: PII inside `COUNT`/`COUNTIF`/`APPROX_COUNT_DISTINCT`,
    boolean checks (`LIKE`, `=`, `IN`, `REGEXP_CONTAINS`), `EXISTS`/`IN` subqueries,
    `* EXCEPT(all PII)`. The rejection tells the model how to fix the query.
+
+   The same guard enforces **attributes only in aggregates**
+   ([safety/exposure.py](../src/retail_agent/safety/exposure.py)). It walks the query's scopes
+   bottom-up (CTEs, derived tables, set operations, scalar subqueries) and tracks for every output
+   column whether it carries an attribute or an identifier (customer id, order id, order item id),
+   and for every scope whether its rows are individual (one per customer, order or item). The
+   query is rejected if the final output has an attribute and its rows are individual, or a
+   column carries both (`ARRAY_AGG(STRUCT(id, city))`). Aggregates hide individual values only
+   over groups: `AVG(age) GROUP BY state` passes, `AVG(age) GROUP BY user_id` and
+   `ANY_VALUE(city)` do not; window functions are row-level. Inner scopes may hold per-customer
+   attributes if an outer scope aggregates them (`WITH c AS (per-customer spend and state) SELECT
+   state, AVG(spend) ... GROUP BY state`). Filters (`WHERE`, `HAVING`, `JOIN ON`) are not output
+   and are allowed. On "top 10 customers with their age and state" the agent gets the rejection,
+   lists the top customers by id and describes the group with a separate aggregate (eval case
+   `a34`). Not covered: groups of one (a rare city); a minimum group size would need a
+   `HAVING COUNT(DISTINCT customer) >= k` rewrite of the outer aggregate.
 2. **Result masking** ([safety/pii.py](../src/retail_agent/safety/pii.py)) before the model sees
-   rows: columns with PII names become `[REDACTED]`, string columns are scanned for e-mail, phone
-   and street address patterns (the address regex catches 99.1% of `street_address` values with no
+   rows (the model never receives unmasked rows): columns with PII names become `[REDACTED]`,
+   string columns are scanned for e-mail, phone and street address patterns (the address regex catches 99.1% of `street_address` values with no
    false positives on product names, brands, cities or states). So the model, the logs and
    LangSmith never see raw PII even if layer 1 missed something.
 3. **Output masking** of the answer, saved reports and exports, and of every logged string
@@ -351,7 +368,7 @@ idempotent handlers.
   flow (including "yes" in the chat not confirming and a changed set being refused), history and
   summarization, preferences, retries and fallbacks, CLI, web app. 21 network tests run against
   real Gemini and BigQuery on demand (`pytest -m network`).
-- *Offline eval* ([evals/](../evals/)): 27 cases in 8 categories (structure, analytics, report,
+- *Offline eval* ([evals/](../evals/)): 28 cases in 8 categories (structure, analytics, report,
   security, resilience, personalization, multi-turn, deletion). Each case can set the user, a
   pre-filled profile, saved reports and several turns. Three layers:
   1. deterministic checks: refusal, tools called or not called, SQL executed and its content,

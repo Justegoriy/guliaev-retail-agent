@@ -18,10 +18,10 @@ comments and the other documents.
 
 | # | Assumption |
 |---|---|
-| D5 | PII fields: `users.first_name`, `last_name`, `email`, `street_address`, `postal_code`, `latitude`, `longitude`, `user_geom` (direct identifiers and precise location, following GDPR/CCPA practice). Not PII: `user_id`, `age`, `gender`, `city`, `state`, `country`, `traffic_source`. The list is in [config/pii_policy.yaml](../config/pii_policy.yaml) |
-| D6 | PII may be used inside SQL (joins, filters, `COUNT(DISTINCT email)`) but is never shown, passed to the model in results, logged, traced, cached or saved in reports |
-| D7 | No protection against re-identification through small groups (k-anonymity) |
-| D8 | Individual customers are shown by id (`Customer #12345`) |
+| D5 | **Never shown** (confirmed by OpsFleet): `users.first_name`, `last_name`, `email`, `street_address`, `postal_code`, `latitude`, `longitude`, `user_geom`. **Customer attributes**, shown only in aggregates: `age`, `gender` (also `orders.gender`), `city`, `state`, `country`, `traffic_source` (D7). Customer and order ids may be shown. The lists are in [config/pii_policy.yaml](../config/pii_policy.yaml) and [safety/exposure.py](../src/retail_agent/safety/exposure.py) |
+| D6 | PII may be used inside SQL (joins, filters, `COUNT(DISTINCT email)`) but is never shown, and never reaches the LLM: query results are masked before they are passed to the model, as are the user's own messages, logs, traces, caches and saved reports |
+| D7 | **Customer attributes only in aggregates** (confirmed by OpsFleet): the SQL Guard rejects any query whose output ties an attribute to one individual: next to a customer or order id, one row per customer or order, or an aggregate over one customer (`AVG(age) GROUP BY user_id`). Filtering by an attribute is allowed (`WHERE state = 'Texas'` with customer ids in the output). Not covered: small groups (a city with one customer); there is no minimum group size (k-anonymity) |
+| D8 | Individual customers are shown by id (`Customer #12345`), with their purchases but without attributes |
 
 ## Reports and destructive operations
 
@@ -71,11 +71,8 @@ items over items that were not cancelled.
 
 ## Open questions for OpsFleet
 
-1. **PII list (D5):** please confirm the fields. Should `city` and `age` be treated as PII?
-2. **Authentication:** which identity provider will executives use in production (Google Workspace,
+1. **Authentication:** which identity provider will executives use in production (Google Workspace,
    Okta, other)? Where does the mapping from people to brands live (directory groups)?
-3. **Company aggregates (D2):** which metrics are acceptable as anonymised company totals? May a
-   manager see the share of their categories in total revenue?
-4. **Scale and SLA (D19):** please confirm the sizing assumptions.
-5. **Model (D18):** which Gemini model and which quota tier will you test with? On a free key the
+2. **Scale and SLA (D19):** please confirm the sizing assumptions.
+3. **Model (D18):** which Gemini model and which quota tier will you test with? On a free key the
    main model's daily limit is reached quickly and the agent switches to the fallback.

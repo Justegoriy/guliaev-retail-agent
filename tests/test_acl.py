@@ -22,7 +22,7 @@ QUERIES = [
     "WITH rev AS (SELECT product_id, SUM(sale_price) AS r FROM order_items GROUP BY 1) "
     "SELECT p.brand, SUM(rev.r) AS r FROM rev JOIN products p ON p.id = rev.product_id GROUP BY 1",
     "SELECT category, COUNT(*) AS n FROM products WHERE brand IN ('Diesel', 'Nike') GROUP BY 1",
-    "SELECT * FROM orders o "
+    "SELECT o.order_id, o.status FROM orders o "
     "WHERE EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.order_id)",
     "SELECT id FROM users UNION ALL SELECT user_id FROM orders",
     "SELECT t.n FROM (SELECT COUNT(*) AS n FROM thelook_ecommerce.order_items) t",

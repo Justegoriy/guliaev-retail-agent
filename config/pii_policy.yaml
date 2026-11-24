@@ -1,6 +1,9 @@
 # PII columns (D5). They may be used inside SQL (joins, filters, COUNT DISTINCT),
 # but must never be returned in results, logs, traces, caches or saved reports (D6).
-# users.id, age, gender, city, state, country are not considered PII here.
+# users.id (and order ids) may be shown: customers are referred to by id.
+# Customer attributes (age, gender, city, state, country, traffic_source, orders.gender)
+# are not hidden columns but may reach the output only aggregated over groups of
+# customers, never tied to one individual (D7): see src/retail_agent/safety/exposure.py.
 pii_columns:
   users:
     - first_name

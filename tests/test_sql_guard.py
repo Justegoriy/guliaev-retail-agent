@@ -166,18 +166,19 @@ def test_unnest_of_pii_is_rejected():
         "SELECT COUNT(DISTINCT email) AS customers FROM users",
         "SELECT COUNT(email) AS n, APPROX_COUNT_DISTINCT(email) AS m FROM users",
         "SELECT COUNTIF(email LIKE '%@gmail.com') AS gmail FROM users",
-        "SELECT id, age FROM users WHERE email LIKE '%@gmail.com'",
+        "SELECT id, created_at FROM users WHERE email LIKE '%@gmail.com'",
         "SELECT o.order_id FROM orders o JOIN users u ON o.user_id = u.id AND u.email IS NOT NULL",
         "SELECT state, COUNT(*) AS n FROM users GROUP BY state, postal_code",
         "SELECT SUM(IF(REGEXP_CONTAINS(email, r'@example'), 1, 0)) AS n FROM users",
         "SELECT id, ROW_NUMBER() OVER (PARTITION BY email ORDER BY created_at) AS rn FROM users",
-        "SELECT * FROM orders WHERE user_id IN (SELECT id FROM users WHERE email LIKE '%.com')",
-        "SELECT * FROM orders o WHERE EXISTS (SELECT * FROM users u WHERE u.id = o.user_id)",
-        "SELECT * FROM (SELECT id, age, state FROM users)",
-        "SELECT c.* FROM (SELECT id, age FROM users) c",
-        "SELECT o.* FROM orders o JOIN users u ON o.user_id = u.id",
-        "SELECT * EXCEPT (first_name, last_name, email, street_address, postal_code, "
-        "latitude, longitude, user_geom) FROM users",
+        # Stars over orders leave out `gender`: it is a customer attribute (test_exposure).
+        "SELECT * EXCEPT (gender) FROM orders "
+        "WHERE user_id IN (SELECT id FROM users WHERE email LIKE '%.com')",
+        "SELECT * EXCEPT (gender) FROM orders o "
+        "WHERE EXISTS (SELECT * FROM users u WHERE u.id = o.user_id)",
+        "SELECT * FROM (SELECT id, created_at FROM users)",
+        "SELECT c.* FROM (SELECT id, created_at FROM users) c",
+        "SELECT o.* EXCEPT (gender) FROM orders o JOIN users u ON o.user_id = u.id",
         "SELECT COUNT(*) AS n FROM users",
     ],
 )

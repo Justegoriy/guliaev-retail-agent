@@ -26,7 +26,7 @@ TABLE_PURPOSE = {
     "orders": "One row per customer order.",
     "order_items": "One row per item sold; the source of revenue.",
     "products": "Product catalogue; `brand` defines data access.",
-    "users": "Customers. Contains PII.",
+    "users": "Customers. Contains PII; attributes only in aggregates.",
 }
 
 COLUMN_NOTES: dict[str, dict[str, str]] = {
@@ -34,7 +34,7 @@ COLUMN_NOTES: dict[str, dict[str, str]] = {
         "order_id": "primary key",
         "user_id": "-> users.id",
         "status": f"order status: {ORDER_STATUSES}",
-        "gender": "customer gender, M/F",
+        "gender": "customer gender, M/F; aggregates only",
         "created_at": "when the order was placed (UTC)",
         "returned_at": "NULL unless returned",
         "shipped_at": "NULL until shipped",
@@ -64,12 +64,13 @@ COLUMN_NOTES: dict[str, dict[str, str]] = {
     },
     "users": {
         "id": "primary key, safe to show as a customer identifier",
-        "age": "age in years",
-        "gender": "M/F",
-        "state": "state / region",
-        "city": "city",
-        "country": "country",
-        "traffic_source": "acquisition channel: Search, Organic, Facebook, Email, Display",
+        "age": "age in years; aggregates only",
+        "gender": "M/F; aggregates only",
+        "state": "state / region; aggregates only",
+        "city": "city; aggregates only",
+        "country": "country; aggregates only",
+        "traffic_source": "acquisition channel: Search, Organic, Facebook, Email, Display; "
+        "aggregates only",
         "created_at": "sign-up time (UTC)",
     },
 }

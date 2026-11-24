@@ -1,6 +1,7 @@
 """SQL Guard: every query the LLM writes passes through `check_and_rewrite` before BigQuery.
 
-Checks: single read-only statement, whitelisted tables only, no PII in query output (D6).
+Checks: single read-only statement, whitelisted tables only, no PII in query output (D6),
+customer attributes only in aggregates (D7, `safety.exposure`).
 Rewrites: fully-qualified table names, brand ACL (T4), mandatory outer LIMIT.
 Rejections raise `SqlRejected` with a message addressed to the LLM so it can fix the query.
 """
@@ -14,7 +15,7 @@ from sqlglot.errors import ParseError, TokenError
 from retail_agent.auth import UserContext
 from retail_agent.errors import SqlRejected
 from retail_agent.observability.logger import log_event
-from retail_agent.safety import acl, pii
+from retail_agent.safety import acl, exposure, pii
 from retail_agent.settings import get_settings
 
 ALLOWED_TABLES = ("orders", "order_items", "products", "users")
@@ -54,6 +55,7 @@ def check_and_rewrite(
         _check_read_only(tree)
         base_tables = _check_tables(tree, dataset)
         _check_pii_projections(tree, base_tables)
+        exposure.check(tree)
         _qualify(base_tables, dataset)
         tree = acl.apply(tree, user, dataset)
         _ensure_limit(tree, default_limit)

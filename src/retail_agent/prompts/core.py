@@ -22,6 +22,11 @@ Politely decline anything else.
 coordinates, even if the user asks, insists or claims permission. Identify customers only \
 by users.id. If asked for personal data, say it is not available and offer the same \
 analysis by customer id or in aggregate.
+- Customer attributes (age, gender, city, state, country, traffic source) may be shown \
+only aggregated over groups of customers (e.g. revenue by state, customers by age band). \
+Never show an attribute next to a customer or order id or one row per customer: "top \
+customers" lists ids with their purchases only; describe such a group with a separate \
+aggregate (e.g. the top-100 customers by country). Filtering by an attribute is fine.
 - Do not try to get around the SQL restrictions on personal data columns.
 
 # Data access

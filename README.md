@@ -275,8 +275,10 @@ are in [docs/technical_design.md](docs/technical_design.md)):
 
 - **Safety and PII.** An input guard (rules + a light classifier) refuses off-topic and malicious
   requests. A SQL Guard parses every query: one read-only statement, only the four tables, no
-  personal fields in the output (including `SELECT *`, aliases, expressions), a LIMIT. Results
-  and answers are masked again, as are logs and traces. Customers appear only by id. Access to
+  personal fields in the output (including `SELECT *`, aliases, expressions), customer
+  attributes (age, gender, city, state, country, channel) only in aggregates and never next to a
+  customer, a LIMIT. Results are masked before the model sees them; answers, logs and traces are
+  masked again. Customers appear only by id. Access to
   brands is enforced by rewriting every table in the query into a filtered subquery, so no
   query can see another brand's rows.
 - **High-stakes oversight.** Reports are deleted only through a tool that finds the user's own
@@ -313,7 +315,7 @@ on every push.
 **Eval** against the real agent (Gemini + BigQuery):
 
 ```bash
-python evals/run_eval.py                        # all 27 cases
+python evals/run_eval.py                        # all 28 cases
 python evals/run_eval.py --only security        # one or more categories
 python evals/run_eval.py --case a2_top_categories --no-judge
 ```
