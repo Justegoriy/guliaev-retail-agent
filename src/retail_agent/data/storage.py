@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS conversations (
     title TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    turns INTEGER NOT NULL DEFAULT 0
+    turns INTEGER NOT NULL DEFAULT 0,
+    title_generated INTEGER NOT NULL DEFAULT 0  -- 1: title settled (summarized or kept)
 );
 CREATE INDEX IF NOT EXISTS conversations_owner ON conversations (owner_user_id, updated_at);
 
@@ -110,6 +111,13 @@ class Conversation:
     created_at: str
     updated_at: str
     turns: int
+    title_generated: bool = False  # False: titled by its first message, not settled yet
+
+
+def _conversation(row: sqlite3.Row) -> Conversation:
+    data = dict(row)
+    data["title_generated"] = bool(data.get("title_generated"))
+    return Conversation(**data)
 
 
 @dataclass(frozen=True)
@@ -189,6 +197,15 @@ class Storage:
         self._lock = threading.Lock()
         with self._lock, self._conn:
             self._conn.executescript(SCHEMA)
+            self._migrate()
+
+    def _migrate(self) -> None:
+        """Columns added after a database was created (`CREATE TABLE IF NOT EXISTS` skips them)."""
+        columns = {r["name"] for r in self._conn.execute("PRAGMA table_info(conversations)")}
+        if "title_generated" not in columns:
+            self._conn.execute(
+                "ALTER TABLE conversations ADD COLUMN title_generated INTEGER NOT NULL DEFAULT 0"
+            )
 
     def close(self) -> None:
         with self._lock:
@@ -307,7 +324,7 @@ class Storage:
 
     def get_conversation(self, conversation_id: str) -> Conversation | None:
         rows = self._query("SELECT * FROM conversations WHERE id = ?", (conversation_id,))
-        return Conversation(**dict(rows[0])) if rows else None
+        return _conversation(rows[0]) if rows else None
 
     def check_conversation_owner(self, conversation_id: str, owner_user_id: str) -> None:
         conversation = self.get_conversation(conversation_id)
@@ -326,13 +343,33 @@ class Storage:
             (conversation_id, owner_user_id, title, now, now),
         )
 
+    def set_conversation_title(
+        self, conversation_id: str, owner_user_id: str, title: str | None
+    ) -> None:
+        """Settle the title (only the owner's conversation): replace the first-message
+        title with a summarized one, or keep it when no usable summary was produced."""
+        self._write(
+            "UPDATE conversations SET title = COALESCE(?, title), title_generated = 1 "
+            "WHERE id = ? AND owner_user_id = ?",
+            (title, conversation_id, owner_user_id),
+        )
+
+    def untitled_conversations(self, owner_user_id: str | None = None) -> list[Conversation]:
+        """Conversations still titled by their first message (for retitling old ones)."""
+        sql = "SELECT * FROM conversations WHERE title_generated = 0"
+        params: tuple[str, ...] = ()
+        if owner_user_id is not None:
+            sql += " AND owner_user_id = ?"
+            params = (owner_user_id,)
+        return [_conversation(r) for r in self._query(sql + " ORDER BY updated_at DESC", params)]
+
     def list_conversations(self, owner_user_id: str, limit: int = 20) -> list[Conversation]:
         rows = self._query(
             "SELECT * FROM conversations WHERE owner_user_id = ? "
             "ORDER BY updated_at DESC, rowid DESC LIMIT ?",
             (owner_user_id, limit),
         )
-        return [Conversation(**dict(r)) for r in rows]
+        return [_conversation(r) for r in rows]
 
     # -- audit log --------------------------------------------------------------------------
 

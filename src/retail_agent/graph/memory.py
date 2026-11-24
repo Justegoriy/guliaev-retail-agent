@@ -158,6 +158,10 @@ class ContextExtraction(BaseModel):
     preference_signals: list[PreferenceSignalOut] = Field(
         default_factory=list, description="Preference signals; usually none."
     )
+    conversation_title: str = Field(
+        "",
+        description="A short title for the conversation, only when asked for one; otherwise empty.",
+    )
 
 
 EXTRACTION_PROMPT = """\
@@ -175,9 +179,22 @@ Beginning of the assistant's answer:
 {answer}
 >>>
 
-{preferences}"""
+{preferences}
+
+{title}"""
 
 NO_PREFERENCES = "Preference signals: always return an empty list."
+NO_TITLE = "Conversation title: return an empty string."
+TITLE_RULES = (
+    "Conversation title: this conversation has no title yet. Write one that tells the user, "
+    "in a list of their conversations, what it is about: 3 to 6 words in English, Title "
+    'Case, naming the topic, metric, segment and period when known (e.g. "Q1 2025 Monthly '
+    'Revenue", "Texas vs California Spending", "Churn Spike Analysis", "Available Data '
+    'Overview"). No quotes, no final period, no personal data, no words like "Question '
+    'about" or "User asks".'
+)
+MAX_TITLE_CHARS = 60
+MIN_TITLE_CHARS = 3
 
 
 def extraction_prompt(
@@ -185,6 +202,8 @@ def extraction_prompt(
     executed: Sequence[ExecutedQuery],
     previous: AnalysisContext | None,
     preference_rules: str = "",
+    *,
+    want_title: bool = False,
 ) -> str:
     queries = [q for q in executed if q.source == "run_sql"]
     return EXTRACTION_PROMPT.format(
@@ -193,7 +212,19 @@ def extraction_prompt(
         purposes="; ".join(q.purpose for q in queries) or "none",
         answer=final_answer(turn)[:800],
         preferences=preference_rules or NO_PREFERENCES,
+        title=TITLE_RULES if want_title else NO_TITLE,
     )
+
+
+def clean_title(text: str) -> str | None:
+    """A model-written conversation title made safe to show, or None if unusable."""
+    title = " ".join(text.split()).strip(" \"'`*#.:;-")
+    title = pii.mask_text(title)[0]
+    if len(title) < MIN_TITLE_CHARS or pii.REDACTED in title:
+        return None
+    if len(title) > MAX_TITLE_CHARS:
+        title = title[:MAX_TITLE_CHARS].rsplit(" ", 1)[0].rstrip(" ,;:-")
+    return title or None
 
 
 def result_summary(turn: Turn) -> str:

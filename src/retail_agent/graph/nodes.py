@@ -43,6 +43,8 @@ NO_PRECEDENTS_CATEGORIES = frozenset({"greeting", "preferences", "report_managem
 # Turns without SQL that still get the post-turn extraction call, because the message may
 # reveal a preference ("shorter, please", "as a table?"). Turns with SQL always get it.
 SIGNAL_CATEGORIES = frozenset({"follow_up", "preferences"})
+# Turns that say nothing about what the conversation is for: no title is made from them.
+NO_TITLE_CATEGORIES = frozenset({"greeting"})
 
 
 @dataclass
@@ -233,22 +235,42 @@ class AgentNodes:
         log_event("answer", chars=len(masked.text), blocked=bool(state.get("blocked")))
         return {"messages": [masked]} if masked is not last else {}
 
+    def _needs_title(self, state: AgentState) -> bool:
+        """The conversation is still titled by its first message and this turn says what
+        it is about (a greeting does not)."""
+        ctx = self.deps.tool_ctx
+        if ctx.storage is None or ctx.conversation_id is None:
+            return False
+        if (state.get("guard") or {}).get("category") in NO_TITLE_CATEGORIES:
+            return False
+        try:
+            conversation = ctx.storage.get_conversation(ctx.conversation_id)
+        except Exception as exc:
+            log_event("conversation_title_failed", level="warning", error=type(exc).__name__)
+            return False
+        return conversation is not None and not conversation.title_generated
+
     def _extract(
-        self, state: AgentState, config: RunnableConfig
+        self, state: AgentState, config: RunnableConfig, *, want_title: bool
     ) -> memory.ContextExtraction | None:
-        """The post-turn aux call: after successful SQL (analysis context), and on turns
-        that may carry preference signals ("shorter, please" usually runs no query)."""
+        """The post-turn aux call: after successful SQL (analysis context), on turns that
+        may carry preference signals ("shorter, please" usually runs no query), and once
+        per conversation for its title."""
         executed = self.deps.tool_ctx.turn.executed
         has_sql = any(q.source == "run_sql" for q in executed)
         prefs = self.deps.tool_ctx.preferences
         category = (state.get("guard") or {}).get("category")
         signal_turn = prefs is not None and category in SIGNAL_CATEGORIES
         extractor = self._aux_call(memory.ContextExtraction, config)
-        if extractor is None or not (has_sql or signal_turn):
+        if extractor is None or not (has_sql or signal_turn or want_title):
             return None
-        rules = signals.extraction_rules(prefs.config, self.profile().labels()) if prefs else ""
+        rules = ""
+        if prefs is not None and (has_sql or signal_turn):
+            rules = signals.extraction_rules(prefs.config, self.profile().labels())
         turn = memory.current_turn(state["messages"])
-        prompt = memory.extraction_prompt(turn, executed, state.get("analysis_context"), rules)
+        prompt = memory.extraction_prompt(
+            turn, executed, state.get("analysis_context"), rules, want_title=want_title
+        )
         try:
             return extractor(prompt)
         except Exception as exc:
@@ -292,11 +314,29 @@ class AgentNodes:
                 error=type(exc).__name__,
             )
 
+    def _set_title(self, raw: str) -> None:
+        # An unusable title keeps the first message for good: asking again on every turn
+        # would cost an aux call each time. A failed call (None extraction) is retried.
+        title = memory.clean_title(raw)
+        if title is None:
+            log_event("conversation_title_skipped", chars=len(raw))
+        ctx = self.deps.tool_ctx
+        try:
+            ctx.storage.set_conversation_title(ctx.conversation_id, ctx.user.user_id, title)
+        except Exception as exc:
+            log_event("conversation_title_failed", level="warning", error=type(exc).__name__)
+            return
+        if title is not None:
+            log_event("conversation_titled", title=title)
+
     def update_context(self, state: AgentState, config: RunnableConfig) -> dict[str, Any]:
         messages = state["messages"]
         settings = self.deps.settings
         update: dict[str, Any] = {}
-        extraction = self._extract(state, config)
+        want_title = self._needs_title(state)
+        extraction = self._extract(state, config, want_title=want_title)
+        if want_title and extraction is not None:
+            self._set_title(extraction.conversation_title)
         context = memory.build_analysis_context(
             memory.current_turn(messages), self.deps.tool_ctx.turn.executed, extraction
         )

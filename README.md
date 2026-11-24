@@ -221,6 +221,9 @@ Outside their categories, managers get only company-wide totals without any brea
 
 Start flags: `--user <id>`, `--continue` (your last conversation), `--resume <id>`, `--debug`.
 
+Conversations get a short title ("Q1 2025 Monthly Revenue") after their first real question;
+it is shown in `/history` and in the web sidebar.
+
 Things to try:
 
 - "Why are users in Texas spending less than users in California?" (multi-step: hypotheses, one
@@ -376,7 +379,7 @@ src/retail_agent/
 config/                           persona, glossary, users, PII policy, preferences
 data/golden_trios.json            Golden Bucket seed
 evals/                            eval cases, runner, results
-scripts/                          review_candidates.py, failure_report.py, check_*.py
+scripts/                          review_candidates.py, failure_report.py, retitle_conversations.py, check_*.py
 tests/                            unit and network tests
 docs/                             architecture, technical design, assumptions
 ```

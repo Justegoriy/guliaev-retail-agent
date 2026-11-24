@@ -430,6 +430,12 @@ trace sampling for weekly manual review.
   follow-ups get a clarifying question.
 - "The report you just made" resolves through the reports saved in this conversation, listed in
   the prompt.
+- Conversation titles: a conversation starts titled by its first message; the same post-turn
+  Flash-Lite call that extracts the analysis context also writes a 3 to 6 word title ("Q1 2025
+  Monthly Revenue") once, on the first turn that says what the conversation is about (not a
+  greeting). No extra model call on turns with SQL; one small call on other turns until the
+  title is settled. The title is masked for PII and shown in `/history` and the web sidebar.
+  `scripts/retitle_conversations.py` titles conversations created before this existed.
 - Long conversations: after 10 turns, the oldest turns are folded into a summary by Flash-Lite
   (questions, key numbers, conclusions, definitions; no PII); the last 6 turns stay verbatim;
   tool results older than two turns are shortened. History is cut only at turn boundaries, so a
