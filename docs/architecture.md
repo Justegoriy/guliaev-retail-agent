@@ -253,7 +253,7 @@ sequenceDiagram
             alt set changed
                 D-->>L: CANCELLED: set changed, ask again
             else same set
-                D->>F: soft delete (deleted_at)
+                D->>F: delete the reports (hard delete)
                 D->>AU: confirmation_approved, reports_deleted
                 D-->>L: DELETED: 3 reports
             end
@@ -450,9 +450,9 @@ graph, the tools or the prompt.
 | Transaction data (`orders`, `order_items`, `products`, `users`) | BigQuery public dataset | BigQuery, read-only; row access policies by brand; policy tags on PII columns | Agent service account, queries run with the user's brand scope | Owned by the data platform | Yes in `users` (names, e-mail, address, postal code, coordinates); never leaves BigQuery unmasked |
 | Conversation history and state (messages, tool calls, analysis context, pending confirmations) | `data/checkpoints.db` (LangGraph SqliteSaver) | Firestore checkpointer, encrypted at rest | The owner (checked on resume); on-call via break-glass | 90 days TTL, user can delete | No (masked before saving) |
 | Conversation index (owner, title, turns) | `data/app.db` `conversations` | Firestore `conversations` | Owner | Same as history | No |
-| Saved reports | `data/app.db` `reports` (markdown, entities, source SQL, soft delete) | Firestore `reports` + GCS for large artifacts | Owner only (no sharing, D13) | Soft-deleted reports hard-deleted after 30 days; active reports while the user is active | No (masked on save) |
+| Saved reports | `data/app.db` `reports` (question, answer in Markdown, source SQL, entities) | Firestore `reports` + GCS for large artifacts | Owner only (no sharing, D13) | Until the owner deletes them (hard delete, no recovery window) | No (masked on save) |
 | Exports | `exports/<id>.md` | GCS bucket with signed URLs | Owner | 30 days | No |
-| Audit log (confirmations, deletions, exports) | `data/app.db` `audit_log` | Firestore `audit` + Cloud Audit Logs, exported to BigQuery | Security, on-call (read-only) | 1 year or per policy | No |
+| Audit log (confirmations, deletions, exports) | `data/app.db` `audit_log` | Firestore `audit` + Cloud Audit Logs, exported to BigQuery | Security, on-call (read-only) | 1 year (purged on open in the prototype, Firestore TTL in production) | No |
 | User preferences and signals | `data/app.db` `user_preferences`, `preference_signals` | Firestore + Redis cache | Owner (view, change, forget), the agent | Signals decay; forgotten on request or after 12 months inactive | No (whitelisted values only) |
 | Golden Bucket trios | `data/golden_trios.json` (15 trios) | GCS (versioned objects) | Analysts write, agent reads | Versioned; deprecated trios kept for audit | No |
 | Golden index | `data/golden_index.npz` (rebuilt when trios change) | Vertex AI Vector Search | Agent, indexer | Rebuilt from GCS | No |

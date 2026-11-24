@@ -27,11 +27,11 @@ comments and the other documents.
 
 | # | Assumption |
 |---|---|
-| D9 | A report is only an explicitly saved document: saved when the user asks, or after the agent offers and the user agrees |
+| D9 | **A report is saved only when the user explicitly asks** (confirmed by OpsFleet); the agent never offers to save. A saved report is the question, the answer (Markdown) and the SQL behind it, plus title and entities for search |
 | D10 | "Client X" in "delete all reports mentioning Client X" is any entity in the report text: brand, product, category or customer id. Matched against title and content (`LIKE`) and the `entities` the model fills in when saving |
-| D11 | Deletion is soft (`deleted_at`) with an audit record. No undo |
+| D11 | **Deletion is a hard delete** (confirmed by OpsFleet): the report row is removed, there is no recovery window and no undo. The audit log (ids, digest, decision, trace id; no report content) is kept for 1 year; older entries are purged when the database is opened |
 | D12 | Confirmation: preview, then `Delete N reports? [y/N]`. Only `y`/`yes` confirms; anything else cancels. No stronger confirmation for bulk deletes. The pending action lives until the user's next input; a new question cancels it and is answered right away |
-| D13 | No sharing: users see and delete only their own reports, the CEO included |
+| D13 | No sharing: only the author sees and deletes a report, the CEO included (confirmed by OpsFleet) |
 | D14 | Reports are markdown. `export_report` (to `exports/`) exists to demonstrate an extension with confirmation, not as a file-format feature |
 
 ## Other defaults

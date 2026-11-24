@@ -12,6 +12,7 @@ import streamlit as st
 from retail_agent.graph.builder import AgentSession, PendingConfirmation
 from retail_agent.observability.logger import log_event
 from retail_agent.personalization.profile import PreferenceRejected, display
+from retail_agent.tools.report_tools import report_markdown
 from retail_agent.turns import Turn, TurnResult
 from retail_agent.web import backend as web
 
@@ -344,10 +345,14 @@ def reports_view(session: AgentSession) -> None:
     for r in reports:
         here = " · this conversation" if r.conversation_id == session.conversation_id else ""
         with st.expander(f"{r.title} · {web.short_date(r.created_at)} UTC{here}"):
+            if r.question:
+                st.markdown(f"**Question:** {r.question}")
             st.markdown(r.content)
+            for sql in r.source_queries:
+                st.code(sql, language="sql")
             st.download_button(
                 "Download .md",
-                r.content,
+                report_markdown(r),
                 file_name=f"report-{r.id}.md",
                 mime="text/markdown",
                 icon=":material/download:",

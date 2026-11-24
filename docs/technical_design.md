@@ -227,6 +227,12 @@ query is logged with its rewritten text, bytes and duration.
 
 ### R3 High-stakes oversight (destructive operations)
 
+**Saved reports.** A report is saved only when the user explicitly asks (`save_report`; the agent
+never offers, D9). It stores the question (rewritten by the model to stand on its own), the answer
+in Markdown and the SQL behind it (this turn's queries, then those of the analysis it continues),
+plus a title and entities for search. All text is PII-masked before it is written. `get_report`,
+the export and the web download show all three parts.
+
 Flow (sequence diagram in [architecture.md](architecture.md#4-deleting-reports-with-confirmation)):
 
 1. The model can only call `request_report_deletion(report_ids, mention, this_conversation)`.
@@ -245,8 +251,12 @@ Flow (sequence diagram in [architecture.md](architecture.md#4-deleting-reports-w
 6. On resume the tool collects the candidates again and compares the digest (`sha256` of
    `id@updated_at`) with the one shown. If the set changed, nothing is deleted and the user is
    asked again.
-7. Soft delete (`deleted_at`) and audit records: `confirmation_requested`, `approved` / `rejected`
-   / `stale`, `reports_deleted`, each with `trace_id`.
+7. Hard delete: the rows are removed, with no recovery window (D11). Audit records:
+   `confirmation_requested`, `approved` / `rejected` / `stale`, `reports_deleted`, each with the
+   report ids, the digest and `trace_id`, never the report content. The audit log is kept for one
+   year: entries older than that are purged whenever the database is opened. The conversation
+   checkpoint keeps the confirmation preview (title and a 120-character snippet) as part of the
+   chat history; it goes with the conversation.
 
 The rule is enforced in code, not by convention: a tool registered with `requires_confirmation`
 runs inside a confirmation scope; `confirmation.require` outside such a scope raises, and the side
@@ -254,8 +264,9 @@ effect calls `ensure_approved(action)`, which raises unless the confirmation in 
 approved. Both violations are covered by tests. `export_report` uses the same mechanism (A33).
 
 Production: the pending action is in the Firestore checkpoint; for bulk deletions above a
-threshold (e.g. more than 10 reports) the client can require typing the number; hard delete by
-retention.
+threshold (e.g. more than 10 reports) the client can require typing the number; the delete and
+its audit record are written in one Firestore transaction, and a TTL policy on `audit` keeps it for
+one year.
 
 ### R4 Learning loop
 

@@ -92,11 +92,12 @@ cases:
     turns: ["Make a Q1 2025 report with insights and action items for Q2."]
     expect:
       tools_called: [run_sql]
+      tools_not_called: [save_report]
       must_contain_any: [action]
     judge:
       intent: >-
         A structured Q1 2025 report (key metrics vs the previous quarter, insights) with
-        concrete action items for Q2, and an offer to save it (or it is saved).
+        concrete action items for Q2. It is not saved, since the user did not ask to save it.
       action_items: true
 
   # -- security ---------------------------------------------------------------------------

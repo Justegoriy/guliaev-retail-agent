@@ -81,7 +81,16 @@ class SaveReportArgs(BaseModel):
     title: str = Field(
         min_length=1, max_length=200, description="Short title, e.g. 'Q1 2024 sales review'."
     )
-    content_markdown: str = Field(min_length=1, description="The full report in Markdown.")
+    question: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="The user's question the report answers, understandable on its own "
+        "(resolve 'it' and 'the same' from the conversation), e.g. 'Q1 2025 sales review "
+        "with insights and action items for Q2'.",
+    )
+    content_markdown: str = Field(
+        min_length=1, description="The answer: the full report in Markdown."
+    )
     entities: list[str] = Field(
         default_factory=list,
         description="Brands, products, categories, states, metrics, segments and customer "
@@ -101,6 +110,7 @@ def source_queries(ctx: ToolContext, analysis_context: dict | None) -> list[str]
 def _save_report(ctx: ToolContext) -> BaseTool:
     def save_report(
         title: str,
+        question: str,
         content_markdown: str,
         tool_call_id: str,
         entities: list[str] | None = None,
@@ -110,6 +120,7 @@ def _save_report(ctx: ToolContext) -> BaseTool:
             owner_user_id=ctx.user.user_id,
             conversation_id=ctx.conversation_id,
             title=_clean(title),
+            question=_clean(question),
             content=_clean(content_markdown),
             entities=_dedupe(_clean(e.strip()) for e in entities or []),
             source_queries=source_queries(ctx, analysis_context),
@@ -133,11 +144,24 @@ def _save_report(ctx: ToolContext) -> BaseTool:
         func=save_report,
         name="save_report",
         description=(
-            "Save a report to the user's report library. Call only when the user asked to "
-            "save it or agreed to your offer. Returns the report id."
+            "Save a report (question, answer and the SQL behind it) to the user's report "
+            "library. Call only when the user explicitly asks to save it; never offer to. "
+            "Returns the report id."
         ),
         args_schema=SaveReportArgs,
     )
+
+
+def report_markdown(report: Report) -> str:
+    """The whole report as one Markdown document: question, answer, SQL."""
+    parts = [f"# {report.title}\n"]
+    if report.question:
+        parts.append(f"**Question:** {report.question}\n")
+    parts.append(report.content.strip() + "\n")
+    if report.source_queries:
+        parts.append("## SQL\n")
+        parts += [f"```sql\n{sql.strip()}\n```\n" for sql in report.source_queries]
+    return "\n".join(parts)
 
 
 # -- list / search / get --------------------------------------------------------------------
@@ -215,7 +239,9 @@ def _get_report(ctx: ToolContext) -> BaseTool:
             return _not_found(report_id)
         return (
             f"OK: report {report.id}, {report.title!r}, created {report.created_at}\n"
-            f"Entities: {', '.join(report.entities) or 'none'}\n\n{report.content}"
+            f"Question: {report.question or 'not recorded'}\n"
+            f"Entities: {', '.join(report.entities) or 'none'}\n"
+            f"SQL queries: {len(report.source_queries)}\n\n{report.content}"
         )
 
     return StructuredTool.from_function(
@@ -327,8 +353,8 @@ def _request_report_deletion(ctx: ToolContext) -> BaseTool:
             return "CANCELLED by user: nothing was deleted."
 
         confirmation.ensure_approved("delete_reports")
-        deleted = _storage(ctx).soft_delete_reports(ctx.user.user_id, ids)
-        _audit(ctx)("reports_deleted", deleted, {"digest": set_digest, "soft": True})
+        deleted = _storage(ctx).delete_reports(ctx.user.user_id, ids)
+        _audit(ctx)("reports_deleted", deleted, {"digest": set_digest})
         log_event("deletion_confirmed", report_ids=deleted)
         return f"DELETED: {len(deleted)} reports [{', '.join(deleted)}].{note}"
 
@@ -375,7 +401,7 @@ def _export_report(ctx: ToolContext) -> BaseTool:
         confirmation.ensure_approved("export_report")
         exports_dir.mkdir(parents=True, exist_ok=True)
         header = EXPORTS_HEADER.format(id=report.id, created_at=report.created_at)
-        target.write_text(f"{header}# {report.title}\n\n{report.content}\n", encoding="utf-8")
+        target.write_text(header + report_markdown(report), encoding="utf-8")
         _audit(ctx)("report_exported", [report.id], {"path": str(target)})
         log_event("report_exported", report_id=report.id, path=str(target))
         return f"EXPORTED: report {report.id} written to {target}."

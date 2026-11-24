@@ -1,8 +1,10 @@
 """Application database (SQLite): saved reports, conversations, audit log, user preferences.
 
-Every report query is scoped to its owner and skips soft-deleted rows: the repository
-has no method that returns another user's report, so ownership cannot be forgotten in
-a tool. The schema is created with `CREATE TABLE IF NOT EXISTS` on open.
+Every report query is scoped to its owner: the repository has no method that returns
+another user's report, so ownership cannot be forgotten in a tool. Deleting a report
+removes the row (no recovery window). Audit entries are kept for `AUDIT_RETENTION_DAYS`
+and older ones are purged when the database is opened. The schema is created with
+`CREATE TABLE IF NOT EXISTS` on open, after `_migrate` for databases of older versions.
 """
 
 import json
@@ -11,7 +13,7 @@ import threading
 import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -21,14 +23,14 @@ CREATE TABLE IF NOT EXISTS reports (
     owner_user_id TEXT NOT NULL,
     conversation_id TEXT NOT NULL,
     title TEXT NOT NULL,
-    content TEXT NOT NULL,
+    question TEXT NOT NULL DEFAULT '',  -- the analytical question the report answers
+    content TEXT NOT NULL,              -- the answer (Markdown)
     entities TEXT NOT NULL DEFAULT '[]',
-    source_queries TEXT NOT NULL DEFAULT '[]',
+    source_queries TEXT NOT NULL DEFAULT '[]',  -- the SQL behind the answer
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    deleted_at TEXT
+    updated_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS reports_owner ON reports (owner_user_id, deleted_at);
+CREATE INDEX IF NOT EXISTS reports_owner_created ON reports (owner_user_id, created_at);
 CREATE INDEX IF NOT EXISTS reports_conversation ON reports (conversation_id);
 
 CREATE TABLE IF NOT EXISTS conversations (
@@ -51,6 +53,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     details TEXT NOT NULL DEFAULT '{}',
     trace_id TEXT
 );
+CREATE INDEX IF NOT EXISTS audit_log_ts ON audit_log (ts);
 
 CREATE TABLE IF NOT EXISTS user_preferences (
     user_id TEXT NOT NULL,
@@ -78,6 +81,7 @@ CREATE INDEX IF NOT EXISTS preference_signals_user ON preference_signals (user_i
 """
 
 MAX_TITLE_CHARS = 200
+AUDIT_RETENTION_DAYS = 365
 MAX_CONVERSATION_TITLE_CHARS = 80
 
 
@@ -91,11 +95,12 @@ class Report:
     owner_user_id: str
     conversation_id: str
     title: str
-    content: str
+    content: str  # the answer (Markdown)
     entities: tuple[str, ...]
-    source_queries: tuple[str, ...]
+    source_queries: tuple[str, ...]  # the SQL behind the answer
     created_at: str
     updated_at: str
+    question: str = ""  # the analytical question the report answers
 
     def snippet(self, chars: int = 120) -> str:
         lines = [line.strip("#*- ").strip() for line in self.content.splitlines()]
@@ -168,7 +173,7 @@ def _like_pattern(text: str) -> str:
 
 
 _REPORT_COLUMNS = (
-    "id, owner_user_id, conversation_id, title, content, entities, source_queries, "
+    "id, owner_user_id, conversation_id, title, question, content, entities, source_queries, "
     "created_at, updated_at"
 )
 
@@ -179,6 +184,7 @@ def _report(row: sqlite3.Row) -> Report:
         owner_user_id=row["owner_user_id"],
         conversation_id=row["conversation_id"],
         title=row["title"],
+        question=row["question"],
         content=row["content"],
         entities=tuple(json.loads(row["entities"])),
         source_queries=tuple(json.loads(row["source_queries"])),
@@ -188,7 +194,9 @@ def _report(row: sqlite3.Row) -> Report:
 
 
 class Storage:
-    def __init__(self, path: Path | str) -> None:
+    def __init__(
+        self, path: Path | str, *, audit_retention_days: int = AUDIT_RETENTION_DAYS
+    ) -> None:
         if str(path) != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         # Tool calls run in worker threads; one connection guarded by a lock is enough here.
@@ -196,16 +204,31 @@ class Storage:
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.Lock()
         with self._lock, self._conn:
-            self._conn.executescript(SCHEMA)
             self._migrate()
+            self._conn.executescript(SCHEMA)
+        self.purge_audit(older_than_days=audit_retention_days)
+
+    def _columns(self, table: str) -> set[str]:
+        return {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
 
     def _migrate(self) -> None:
-        """Columns added after a database was created (`CREATE TABLE IF NOT EXISTS` skips them)."""
-        columns = {r["name"] for r in self._conn.execute("PRAGMA table_info(conversations)")}
-        if "title_generated" not in columns:
+        """Bring a database of an older version to the current schema.
+
+        Runs before `SCHEMA`, whose `CREATE ... IF NOT EXISTS` skips existing tables.
+        """
+        conversations = self._columns("conversations")
+        if conversations and "title_generated" not in conversations:
             self._conn.execute(
                 "ALTER TABLE conversations ADD COLUMN title_generated INTEGER NOT NULL DEFAULT 0"
             )
+        reports = self._columns("reports")
+        if reports and "question" not in reports:
+            self._conn.execute("ALTER TABLE reports ADD COLUMN question TEXT NOT NULL DEFAULT ''")
+        if "deleted_at" in reports:
+            # Soft deletion was replaced by hard deletion: soft-deleted rows go for good.
+            self._conn.execute("DELETE FROM reports WHERE deleted_at IS NOT NULL")
+            self._conn.execute("DROP INDEX IF EXISTS reports_owner")
+            self._conn.execute("ALTER TABLE reports DROP COLUMN deleted_at")
 
     def close(self) -> None:
         with self._lock:
@@ -229,18 +252,20 @@ class Storage:
         content: str,
         entities: Iterable[str] = (),
         source_queries: Iterable[str] = (),
+        question: str = "",
     ) -> Report:
         now = _now()
         while True:
             report_id = uuid.uuid4().hex[:8]
             try:
                 self._write(
-                    f"INSERT INTO reports ({_REPORT_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    f"INSERT INTO reports ({_REPORT_COLUMNS}) VALUES ({', '.join('?' * 10)})",
                     (
                         report_id,
                         owner_user_id,
                         conversation_id,
                         title.strip()[:MAX_TITLE_CHARS],
+                        question.strip(),
                         content,
                         json.dumps(list(entities), ensure_ascii=False),
                         json.dumps(list(source_queries), ensure_ascii=False),
@@ -256,8 +281,7 @@ class Storage:
 
     def get_report(self, owner_user_id: str, report_id: str) -> Report | None:
         rows = self._query(
-            f"SELECT {_REPORT_COLUMNS} FROM reports "
-            "WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL",
+            f"SELECT {_REPORT_COLUMNS} FROM reports WHERE id = ? AND owner_user_id = ?",
             (report_id, owner_user_id),
         )
         return _report(rows[0]) if rows else None
@@ -270,7 +294,7 @@ class Storage:
         marks = ", ".join("?" * len(ids))
         rows = self._query(
             f"SELECT {_REPORT_COLUMNS} FROM reports WHERE id IN ({marks}) "
-            "AND owner_user_id = ? AND deleted_at IS NULL ORDER BY created_at, rowid",
+            "AND owner_user_id = ? ORDER BY created_at, rowid",
             (*ids, owner_user_id),
         )
         return [_report(r) for r in rows]
@@ -279,9 +303,7 @@ class Storage:
         self, owner_user_id: str, *, conversation_id: str | None = None, limit: int = 20
     ) -> list[Report]:
         """Newest first."""
-        sql = (
-            f"SELECT {_REPORT_COLUMNS} FROM reports WHERE owner_user_id = ? AND deleted_at IS NULL"
-        )
+        sql = f"SELECT {_REPORT_COLUMNS} FROM reports WHERE owner_user_id = ?"
         params: list[Any] = [owner_user_id]
         if conversation_id is not None:
             sql += " AND conversation_id = ?"
@@ -291,32 +313,30 @@ class Storage:
         return [_report(r) for r in self._query(sql, params)]
 
     def search_reports(self, owner_user_id: str, query: str, *, limit: int = 50) -> list[Report]:
-        """Case-insensitive substring match in the title, the content or the entities."""
+        """Case-insensitive substring match in the title, question, content or entities."""
         query = query.strip()
         if not query:
             return []
         pattern = _like_pattern(query)
         rows = self._query(
             f"SELECT {_REPORT_COLUMNS} FROM reports "
-            "WHERE owner_user_id = ? AND deleted_at IS NULL AND ("
-            "lower(title) LIKE ? ESCAPE '\\' OR lower(content) LIKE ? ESCAPE '\\' "
-            "OR lower(entities) LIKE ? ESCAPE '\\') "
+            "WHERE owner_user_id = ? AND ("
+            "lower(title) LIKE ? ESCAPE '\\' OR lower(question) LIKE ? ESCAPE '\\' "
+            "OR lower(content) LIKE ? ESCAPE '\\' OR lower(entities) LIKE ? ESCAPE '\\') "
             "ORDER BY created_at DESC, rowid DESC LIMIT ?",
-            (owner_user_id, pattern, pattern, pattern, limit),
+            (owner_user_id, pattern, pattern, pattern, pattern, limit),
         )
         return [_report(r) for r in rows]
 
-    def soft_delete_reports(self, owner_user_id: str, report_ids: Iterable[str]) -> list[str]:
-        """Mark the caller's live reports deleted; returns the ids actually deleted."""
+    def delete_reports(self, owner_user_id: str, report_ids: Iterable[str]) -> list[str]:
+        """Permanently delete the caller's reports; returns the ids actually deleted."""
         ids = [r.id for r in self.get_reports(owner_user_id, report_ids)]
         if not ids:
             return []
         marks = ", ".join("?" * len(ids))
-        now = _now()
         self._write(
-            f"UPDATE reports SET deleted_at = ?, updated_at = ? WHERE id IN ({marks}) "
-            "AND owner_user_id = ? AND deleted_at IS NULL",
-            (now, now, *ids, owner_user_id),
+            f"DELETE FROM reports WHERE id IN ({marks}) AND owner_user_id = ?",
+            (*ids, owner_user_id),
         )
         return ids
 
@@ -392,6 +412,13 @@ class Storage:
                 json.dumps(details or {}, ensure_ascii=False, default=str),
                 trace_id,
             ),
+        )
+
+    def purge_audit(self, *, older_than_days: int = AUDIT_RETENTION_DAYS) -> int:
+        """Delete audit entries older than the retention period; returns how many."""
+        cutoff = datetime.now(UTC) - timedelta(days=older_than_days)
+        return self._write(
+            "DELETE FROM audit_log WHERE ts < ?", (cutoff.isoformat(timespec="seconds"),)
         )
 
     # -- user preferences --------------------------------------------------------------------

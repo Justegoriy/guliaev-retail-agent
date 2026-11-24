@@ -4,6 +4,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from harness import CEO, REVENUE_SQL, Harness, calls, tool_call
 from retail_agent.auth import UserContext
 from retail_agent.data.storage import ConversationAccessError
+from retail_agent.tools.report_tools import report_markdown
 
 BOB = UserContext("bob", "Bob", "ceo")
 EMAIL = "john.doe@example.com"
@@ -15,7 +16,12 @@ def h(tmp_path):
 
 
 def save_call(title: str, call_id: str, **extra) -> dict:
-    args = {"title": title, "content_markdown": f"# {title}\nJeans revenue grew 5%.", **extra}
+    args = {
+        "title": title,
+        "question": f"{title} with action items",
+        "content_markdown": f"# {title}\nJeans revenue grew 5%.",
+        **extra,
+    }
     return tool_call("save_report", args, call_id)
 
 
@@ -65,6 +71,7 @@ def test_saved_report_is_masked_and_keeps_its_sql(h):
             save_call(
                 "Revenue 2024",
                 "s1",
+                question=f"Monthly revenue in 2024 and the top buyer {EMAIL}",
                 content_markdown=f"Top buyer {EMAIL}",
                 entities=["revenue", EMAIL],
             )
@@ -73,6 +80,7 @@ def test_saved_report_is_masked_and_keeps_its_sql(h):
     )
     (report,) = h.storage.list_reports("ceo")
     assert EMAIL not in report.content and "[REDACTED]" in report.content
+    assert report.question == "Monthly revenue in 2024 and the top buyer [REDACTED]"
     assert report.entities == ("revenue", "[REDACTED]")
     # Built from the previous turn's analysis: its SQL is recorded as the source.
     assert report.source_queries == (REVENUE_SQL,)
@@ -263,7 +271,9 @@ def test_export_needs_confirmation(h):
 
     h.turn("export this report", export_call(last, "e2"))
     h.resume("yes", AIMessage("Exported."))
-    assert target.read_text(encoding="utf-8").splitlines()[1] == "# Q2 review"
+    lines = target.read_text(encoding="utf-8").splitlines()
+    assert lines[1] == "# Q2 review"
+    assert "**Question:** Q2 review with action items" in lines
     entry = h.storage.audit_entries("ceo")[0]
     assert entry.action == "report_exported" and entry.target_ids == (last,)
 
@@ -309,3 +319,34 @@ def test_conversation_is_recorded_and_protected(h):
     assert conversation.title == "monthly revenue"
     with pytest.raises(ConversationAccessError):
         h.new_session(user=BOB)
+
+
+def test_report_is_question_answer_and_sql(h):
+    h.turn(
+        "monthly revenue for 2024",
+        calls(tool_call("run_sql", {"sql": REVENUE_SQL, "purpose": "revenue"}, "q1")),
+        AIMessage("Revenue: $300."),
+    )
+    h.turn("save it as a report", calls(save_call("Revenue 2024", "s1")), AIMessage("Saved."))
+    (report,) = h.storage.list_reports("ceo")
+    h.turn(
+        "show it",
+        calls(tool_call("get_report", {"report_id": report.id}, "g1")),
+        AIMessage("Here it is."),
+    )
+    (shown,) = tool_results(h, "get_report")
+    assert "Question: Revenue 2024 with action items" in shown
+    assert "SQL queries: 1" in shown and "Jeans revenue grew 5%." in shown
+
+    markdown = report_markdown(report)
+    assert (
+        markdown.index("**Question:**") < markdown.index("Jeans revenue") < markdown.index("## SQL")
+    )
+    assert f"```sql\n{REVENUE_SQL}\n```" in markdown
+
+
+def test_save_without_a_question_is_an_argument_error(h):
+    args = {"title": "Q1", "content_markdown": "text"}
+    h.turn("save it", calls(tool_call("save_report", args, "s1")), AIMessage("Retry."))
+    assert tool_results(h, "save_report")[0].startswith("ERROR(invalid_args)")
+    assert h.storage.list_reports("ceo") == []

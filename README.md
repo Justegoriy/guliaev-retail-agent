@@ -281,7 +281,8 @@ are in [docs/technical_design.md](docs/technical_design.md)):
   query can see another brand's rows.
 - **High-stakes oversight.** Reports are deleted only through a tool that finds the user's own
   matching reports, pauses the conversation and asks the user (`[y/N]` or buttons). The exact set
-  shown is deleted; if it changed, nothing is deleted. Soft delete plus an audit log. The same
+  shown is deleted; if it changed, nothing is deleted. Deletion is permanent (no recovery
+  window); the audit log, kept for a year, records who deleted which ids. The same
   mechanism protects `export_report`.
 - **Resilience.** Failed SQL (syntax, empty results, too expensive) goes back to the model to fix,
   at most 3 times per turn, with byte and step budgets. Gemini calls have rate limiting, timeouts,
