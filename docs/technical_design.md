@@ -233,6 +233,21 @@ model (D6). Customers are shown by id (`Customer #12345`). Customer attributes (
 3. **Output masking** of the answer, saved reports and exports, and of every logged string
    (including SQL text with PII literals) and LangSmith payloads (anonymizer).
 
+**PII never reaches a model** (confirmed by OpsFleet). Every model input is built from masked
+data: the user's message is masked before it enters the conversation state, so the agent, the
+input-guard classifier, context extraction, titles, summaries and the Golden Bucket embedding
+query all see the masked text; query results are masked before they become tool results; the
+Golden Bucket judge gets masked rows; eval judges get masked answers. One end-to-end test
+([tests/test_pii_to_llm.py](../tests/test_pii_to_llm.py)) writes an e-mail, a phone number and
+an address into the question and the query result, runs a long conversation and scans every
+request to every model and every embedding query.
+
+**Retention** ([retention.py](../src/retail_agent/retention.py), D31): chat history is kept 90
+days after the conversation's last activity. At start the agent removes expired conversations
+with their checkpoint threads, log and payload lines older than 90 days, and Golden Bucket
+candidates older than 90 days. Saved reports stay until the user deletes them; the audit log is
+kept one year.
+
 Production adds BigQuery policy tags on PII columns (the agent's service account cannot read them
 at all) and Cloud DLP for free text.
 

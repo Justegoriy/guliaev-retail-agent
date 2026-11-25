@@ -493,6 +493,12 @@ class CandidateStore:
         )
         return candidate
 
+    def replace_all(self, candidates: Sequence[Candidate]) -> None:
+        """Rewrite the store with `candidates` (retention)."""
+        with self._lock:
+            text = "".join(json.dumps(c.to_json(), ensure_ascii=False) + "\n" for c in candidates)
+            _write_atomic(self.path, text)
+
     def update(self, candidate: Candidate) -> None:
         with self._lock:
             items = self.all()

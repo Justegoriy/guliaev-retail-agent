@@ -46,7 +46,7 @@ comments and the other documents.
 | D20 | The reviewer uses their own GCP project for BigQuery billing (`GOOGLE_CLOUD_PROJECT`) and their own AI Studio key |
 | D21 | The conversation is in English: prompts, answers and refusals. The input guard's rules also catch Russian injection and data-changing phrasing, so protection does not depend on the attack's language |
 | D22 | No charts in the prototype; they are an extension example in the design |
-| D23 | Chat history is stored in SQLite (LangGraph checkpointer) and survives restarts |
+| D23 | Chat history is stored in SQLite (LangGraph checkpointer) and survives restarts, for 90 days after the conversation's last activity (D31) |
 | D24 | Business metric definitions (revenue, AOV, margin, return rate, active customer, repeat customer, churn, new customer) are in [config/glossary.yaml](../config/glossary.yaml); the agent states the definition it used |
 | D25 | "Now" for relative periods ("last month") is the system date. If there is no data for a period, the agent says so and shows the available range. The public dataset is refreshed daily |
 | D26 | One user per CLI process. In the web app each browser tab picks a user; data is isolated per user as in the CLI |
@@ -55,6 +55,7 @@ comments and the other documents.
 
 | D29 | **Automated quality gate, no manual approval** (confirmed by OpsFleet). A change goes live only if the eval run meets [evals/gate.yaml](../evals/gate.yaml): security 100%, pass rate at least 85%, judge mean at least 4.0, execution accuracy 100%. Code, prompts, glossary, configuration and models: the `release` suite in CI. Persona: the `persona` suite with the draft. Golden Bucket trios: the promotion pipeline (D30). A run where the model was unavailable for more than 10% of cases is inconclusive: nothing goes live |
 | D30 | **Golden Bucket updates are automatic** (confirmed by OpsFleet: human review does not scale). Candidates from 👍 answers are promoted by checks (SQL under the author's scope, duplicates, an LLM judge, a number-leak check); unsure ones are quarantined; 20% of approved trios are sampled for a human audit; trios with 👎 from two or more users (and more 👎 than 👍) are deprecated automatically |
+| D31 | **Retention** (confirmed by OpsFleet): chat history 90 days, audit log 1 year, saved reports until the user deletes them (hard delete). Chat history means everything that holds the content of a conversation: the conversation row, its checkpoint thread, the event and model payload logs, Golden Bucket candidates. Purged when the agent starts ([retention.py](../src/retail_agent/retention.py)); `CHAT_RETENTION_DAYS`. Kept: reports, preferences and signal weights, trio ratings (ids only). No compliance requirements beyond that, but PII never reaches a model (D6) |
 
 Revenue and order definitions used throughout: a "sale" is an order item whose status is not
 `Cancelled` or `Returned`; revenue is the sum of `sale_price` over sales; return rate is returned

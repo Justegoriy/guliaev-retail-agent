@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     # User preferences (keys, values, thresholds)
     preferences_config_path: Path = Path("config/preferences.yaml")
 
+    # Retention: chat history (conversations, checkpoints, logs, candidates); audit is 1 year
+    chat_retention_days: int = Field(90, ge=1)
+
     # Storage & logs (relative paths are resolved against the project root)
     app_db_path: Path = Path("data/app.db")
     checkpoint_db_path: Path = Path("data/checkpoints.db")

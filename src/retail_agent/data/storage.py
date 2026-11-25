@@ -384,6 +384,15 @@ class Storage:
             (title, conversation_id, owner_user_id),
         )
 
+    def conversations_inactive_since(self, cutoff: str) -> list[str]:
+        """Ids of conversations whose last activity is before `cutoff` (ISO timestamp)."""
+        rows = self._query("SELECT id FROM conversations WHERE updated_at < ?", (cutoff,))
+        return [r["id"] for r in rows]
+
+    def delete_conversation(self, conversation_id: str) -> None:
+        """Remove the conversation row (retention); saved reports are kept."""
+        self._write("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+
     def untitled_conversations(self, owner_user_id: str | None = None) -> list[Conversation]:
         """Conversations still titled by their first message (for retitling old ones)."""
         sql = "SELECT * FROM conversations WHERE title_generated = 0"

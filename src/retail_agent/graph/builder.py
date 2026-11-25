@@ -30,6 +30,7 @@ from langgraph.prebuilt import ToolNode
 from langgraph.types import Command
 from pydantic import BaseModel
 
+from retail_agent import retention
 from retail_agent.auth import UserContext
 from retail_agent.data.bigquery import BigQueryRunner
 from retail_agent.data.storage import Conversation, ConversationAccessError, Report, Storage
@@ -563,6 +564,12 @@ def create_resources(settings: Settings, runner: BigQueryRunner | None = None) -
     """Production wiring: BigQuery, schema, Gemini, golden index, SQLite storage/checkpoints."""
     runner = runner or BigQueryRunner.from_settings(settings)
     storage = Storage(settings.app_db_path)
+    checkpointer = open_checkpointer(settings.checkpoint_db_path)
+    candidates = CandidateStore(settings.golden_candidates_path)
+    try:
+        retention.purge_expired(settings, storage, checkpointer, candidates)
+    except Exception as exc:  # retention must never stop the agent from starting
+        log_event("retention_failed", level="error", error=type(exc).__name__, detail=str(exc))
     return AgentResources(
         settings=settings,
         runner=runner,
@@ -572,8 +579,8 @@ def create_resources(settings: Settings, runner: BigQueryRunner | None = None) -
             storage, preference_profile.load_config(settings.preferences_config_path)
         ),
         golden=load_golden_index(settings),
-        candidates=CandidateStore(settings.golden_candidates_path),
-        checkpointer=open_checkpointer(settings.checkpoint_db_path),
+        candidates=candidates,
+        checkpointer=checkpointer,
         aux=_aux_factory(settings),
     )
 

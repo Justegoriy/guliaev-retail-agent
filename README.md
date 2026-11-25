@@ -385,7 +385,8 @@ the quality gate into `persona.md`, which is re-read every turn),
 `glossary.yaml` (metric definitions), `users.yaml` (users and their brands), `pii_policy.yaml`
 (personal fields and patterns), `preferences.yaml` (allowed preference keys and thresholds).
 
-Data files are created on first run: `data/app.db` (reports, conversations, preferences, audit),
+Data files are created on first run (chat history and logs are kept 90 days, the audit log one
+year, reports until deleted): `data/app.db` (reports, conversations, preferences, audit),
 `data/checkpoints.db` (conversation history), `data/golden_index.npz`, `data/schema_cache.json`.
 Delete them to start fresh.
 
