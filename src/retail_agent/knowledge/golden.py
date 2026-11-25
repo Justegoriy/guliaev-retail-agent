@@ -7,9 +7,11 @@
 - Embeddings unavailable (no key, quota, timeout) -> keyword overlap instead, with a
   `golden_degraded` event; after a failed query embeddings are skipped for a while so
   every turn does not wait for a timeout again.
-- Update loop (lite): `/good` on an answer with successful SQL appends a candidate to
-  `data/golden_candidates.jsonl`; `scripts/review_candidates.py` lets an analyst approve
-  it (the SQL must pass the SQL Guard and a BigQuery dry-run) into the trios file.
+- Update loop: `/good` on an answer with successful SQL appends a candidate to
+  `data/golden_candidates.jsonl` with its author's scope. `knowledge.promotion` checks
+  candidates automatically and approves, quarantines or rejects them; trios whose answers
+  collect negative feedback are deprecated automatically. `scripts/review_candidates.py`
+  is the audit tool for quarantined candidates and a sample of auto-approved trios.
 """
 
 import hashlib
@@ -238,6 +240,18 @@ class GoldenIndex:
     def mode(self) -> str:
         return "embedding" if self._vectors is not None else "keywords"
 
+    def drop(self, trio_id: str) -> bool:
+        """Stop retrieving a trio right away (it was deprecated); False if not indexed."""
+        with self._lock:
+            ids = [t.id for t in self.trios]
+            if trio_id not in ids:
+                return False
+            i = ids.index(trio_id)
+            del self.trios[i], self._keywords[i]
+            if self._vectors is not None:
+                self._vectors = np.delete(self._vectors, i, axis=0)
+            return True
+
     def content_hash(self) -> str:
         payload = json.dumps(
             [self._model_name, [[t.id, t.embedding_text()] for t in self.trios]],
@@ -376,7 +390,7 @@ def precedents_block(hits: Sequence[Retrieved]) -> str:
 # -- candidates (update loop) ------------------------------------------------------------------
 
 
-CandidateStatus = Literal["candidate", "approved", "rejected"]
+CandidateStatus = Literal["candidate", "approved", "quarantined", "rejected"]
 
 
 @dataclass(frozen=True)
@@ -393,6 +407,10 @@ class Candidate:
     reviewed_at: str | None = None
     trio_id: str | None = None
     note: str | None = None
+    user_id: str = ""  # the author, whose access scope the SQL is checked under
+    brands: tuple[str, ...] = ()  # the author's brands (empty: full access)
+    method: str = ""  # method notes without numbers, written during promotion
+    checks: dict[str, Any] | None = None  # promotion results: scores, reasons
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> "Candidate":
@@ -401,12 +419,14 @@ class Candidate:
                 **data,
                 "sql": tuple(data.get("sql") or ()),
                 "tags": tuple(data.get("tags") or ()),
+                "brands": tuple(data.get("brands") or ()),
             }
         )
 
     def to_json(self) -> dict[str, Any]:
         data = asdict(self)
         data["sql"], data["tags"] = list(self.sql), list(self.tags)
+        data["brands"] = list(self.brands)
         return data
 
 
@@ -439,6 +459,8 @@ class CandidateStore:
         user_role: str,
         trace_id: str,
         tags: Iterable[str] = (),
+        user_id: str = "",
+        brands: Iterable[str] = (),
     ) -> Candidate | None:
         """Append a candidate; None if this answer (trace id) was already recorded."""
 
@@ -457,6 +479,8 @@ class CandidateStore:
                 trace_id=trace_id,
                 created_at=_now(),
                 tags=tuple(dict.fromkeys(clean(t.strip()) for t in tags if t.strip())),
+                user_id=user_id,
+                brands=tuple(brands),
             )
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a", encoding="utf-8") as fh:
@@ -499,17 +523,24 @@ def approve_candidate(
     report: str | None = None,
     tags: Sequence[str] | None = None,
     tables: Sequence[str] = (),
+    approved_by: str = "analyst",
+    checks: dict[str, Any] | None = None,
 ) -> Trio:
     """Validate the (possibly edited) candidate and append it to the trios as approved.
 
     `validate_sql` raises (e.g. `SqlRejected`, `SqlInvalid`) if a query must not become a
-    precedent; nothing is written then.
+    precedent; nothing is written then. The trio's notes are `report`, else the method
+    written during promotion; the user's answer is never used, since it holds the numbers
+    of the author's brands and trios are shown to every user.
     """
     queries = [q.strip() for q in (sql if sql is not None else candidate.sql) if q.strip()]
     if not queries:
         raise ValueError("a precedent needs at least one SQL query")
     for query in queries:
         validate_sql(query)
+    notes = (report or candidate.method).strip()
+    if not notes:
+        raise ValueError("a precedent needs method notes (no numbers from the answer)")
     trios = load_trios(trios_path) if trios_path.exists() else []
     taken = {t.id for t in trios}
     base = slugify(trio_id or question or candidate.question)
@@ -521,7 +552,7 @@ def approve_candidate(
             id=new_id,
             question=pii.mask_text(question or candidate.question)[0],
             sql=queries if len(queries) > 1 else queries[0],
-            report=pii.mask_text(report or candidate.answer_summary)[0],
+            report=pii.mask_text(notes)[0],
             tags=list(tags if tags is not None else candidate.tags),
             tables=list(tables),
             status="approved",
@@ -530,13 +561,55 @@ def approve_candidate(
                 "trace_id": candidate.trace_id,
                 "user_role": candidate.user_role,
                 "approved_at": _now(),
+                "approved_by": approved_by,
+                **({"checks": checks} if checks else {}),
             },
         )
     )
     save_trios(trios_path, [*trios, trio])
-    store.update(replace(candidate, status="approved", reviewed_at=_now(), trio_id=trio.id))
-    log_event("golden_candidate_approved", candidate_id=candidate.id, trio_id=trio.id)
+    store.update(
+        replace(
+            candidate,
+            status="approved",
+            reviewed_at=_now(),
+            trio_id=trio.id,
+            checks=checks or candidate.checks,
+        )
+    )
+    log_event(
+        "golden_candidate_approved",
+        candidate_id=candidate.id,
+        trio_id=trio.id,
+        approved_by=approved_by,
+    )
     return trio
+
+
+def mark_audited(trios_path: Path, trio_id: str) -> None:
+    """A person checked an auto-approved trio and kept it."""
+    trios = [
+        replace(t, source={**(t.source or {}), "audited_at": _now()}) if t.id == trio_id else t
+        for t in load_trios(trios_path)
+    ]
+    save_trios(trios_path, trios)
+    log_event("golden_trio_audited", trio_id=trio_id)
+
+
+def deprecate_trio(trios_path: Path, trio_id: str, reason: str) -> bool:
+    """Mark an approved trio deprecated (kept in the file for audit); False if not found."""
+    trios = load_trios(trios_path)
+    found = False
+    updated = []
+    for trio in trios:
+        if trio.id == trio_id and trio.status == "approved":
+            source = {**(trio.source or {}), "deprecated_at": _now(), "deprecated_why": reason}
+            trio = replace(trio, status="deprecated", source=source)
+            found = True
+        updated.append(trio)
+    if found:
+        save_trios(trios_path, updated)
+        log_event("golden_trio_deprecated", trio_id=trio_id, reason=reason)
+    return found
 
 
 def reject_candidate(candidate: Candidate, *, store: CandidateStore, note: str = "") -> None:

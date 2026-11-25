@@ -1,12 +1,15 @@
-"""Review Golden Bucket candidates collected with /good (human in the loop).
+"""Audit the Golden Bucket: the human part of the otherwise automatic update loop.
 
-    python scripts/review_candidates.py            # review pending candidates
-    python scripts/review_candidates.py --list     # show all candidates and their status
+    python scripts/review_candidates.py            # quarantined candidates
+    python scripts/review_candidates.py --audit    # sampled auto-approved trios
+    python scripts/review_candidates.py --list     # all candidates and their status
 
-For each pending candidate: [a]pprove, [e]dit then approve, [r]eject, [s]kip or [q]uit.
-On approval every SQL query must pass the SQL Guard (read-only, whitelisted tables, no
-personal data in the output) and a BigQuery dry-run; the trio is then appended to
-`data/golden_trios.json`. The agent re-embeds the trios on its next start.
+Candidates are approved automatically by `scripts/promote_candidates.py`; people look only
+at what the pipeline was unsure about (quarantined) and at a sample of what it approved.
+For a quarantined candidate: [a]pprove, [e]dit then approve, [r]eject, [s]kip or [q]uit.
+On approval every SQL query must pass the SQL Guard and a BigQuery dry-run; the notes
+default to the method the pipeline wrote, never to the user's answer (it holds the
+author's numbers). For a sampled trio: [k]eep or [d]eprecate.
 """
 
 import argparse
@@ -24,9 +27,12 @@ from retail_agent.knowledge.golden import (
     Candidate,
     CandidateStore,
     approve_candidate,
+    deprecate_trio,
+    mark_audited,
     reject_candidate,
     slugify,
 )
+from retail_agent.knowledge.promotion import audit_queue
 from retail_agent.observability import logger
 from retail_agent.safety import sql_guard
 from retail_agent.settings import get_settings
@@ -75,6 +81,12 @@ def show(candidate: Candidate, index: int, total: int) -> None:
     for i, query in enumerate(candidate.sql, start=1):
         console.print(Syntax(query, "sql", word_wrap=True), f"[dim]query {i}[/dim]")
     console.print(Panel(candidate.answer_summary, title="Answer the user liked"))
+    if candidate.checks:
+        console.print(
+            f"[bold]Pipeline:[/bold] {escape(str(candidate.checks.get('reason', '')))} "
+            f"[dim](score {candidate.checks.get('score', '-')}, "
+            f"leaks {candidate.checks.get('leaks') or '-'})[/dim]"
+        )
 
 
 def make_validator(runner: BigQueryRunner, default_limit: int):
@@ -88,9 +100,9 @@ def make_validator(runner: BigQueryRunner, default_limit: int):
 
 
 def review(store: CandidateStore, trios_path, validate) -> None:
-    pending = store.pending()
+    pending = [c for c in store.all() if c.status == "quarantined"]
     if not pending:
-        console.print("No candidates waiting for review.")
+        console.print("No quarantined candidates.")
         return
     for i, candidate in enumerate(pending, start=1):
         show(candidate, i, len(pending))
@@ -113,8 +125,11 @@ def review(store: CandidateStore, trios_path, validate) -> None:
                     }
                 edits["report"] = ask(
                     "Analyst notes: method and metric definitions, no numbers",
-                    candidate.answer_summary,
+                    candidate.method,
                 )
+                if not edits["report"]:
+                    console.print("[red]Notes are required.[/red]")
+                    continue
                 question = edits.get("question", candidate.question)
                 tags = ask("Tags, comma-separated", ", ".join(candidate.tags))
                 trio_id = ask("Trio id", slugify(question))
@@ -135,6 +150,29 @@ def review(store: CandidateStore, trios_path, validate) -> None:
                 break
 
 
+def audit(store: CandidateStore, trios_path) -> None:
+    _, sampled = audit_queue(store, trios_path)
+    pending = [t for t in sampled if not (t.source or {}).get("audited_at")]
+    if not pending:
+        console.print("No sampled trios waiting for the audit.")
+        return
+    for i, trio in enumerate(pending, start=1):
+        console.rule(f"Auto-approved trio {i}/{len(pending)}: {trio.id}")
+        console.print(f"[bold]Question:[/bold] {trio.question}")
+        for query in trio.sql:
+            console.print(Syntax(query, "sql", word_wrap=True))
+        console.print(Panel(trio.report, title="Method notes"))
+        action = ask(r"\[k]eep / \[d]eprecate / \[q]uit", "k").lower()
+        if action == "q":
+            return
+        if action == "d":
+            deprecate_trio(trios_path, trio.id, ask("Reason", "failed the audit"))
+            console.print("[yellow]Deprecated.[/yellow]")
+        else:
+            mark_audited(trios_path, trio.id)
+            console.print("[green]Kept.[/green]")
+
+
 def list_all(store: CandidateStore) -> None:
     for c in store.all():
         detail = f" -> {c.trio_id}" if c.trio_id else ""
@@ -144,12 +182,19 @@ def list_all(store: CandidateStore) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--list", action="store_true", help="list all candidates and exit")
+    parser.add_argument("--audit", action="store_true", help="audit sampled auto-approved trios")
     args = parser.parse_args(argv)
     settings = get_settings()
     logger.configure(settings.log_path)
     store = CandidateStore(settings.golden_candidates_path)
     if args.list:
         list_all(store)
+        return 0
+    if args.audit:
+        try:
+            audit(store, settings.golden_trios_path)
+        except (EOFError, KeyboardInterrupt):
+            console.print()
         return 0
     runner = BigQueryRunner.from_settings(settings)
     try:

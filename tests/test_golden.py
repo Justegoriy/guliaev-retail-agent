@@ -262,9 +262,14 @@ def test_approved_candidate_becomes_a_retrievable_trio(tmp_path):
     validated = []
 
     trio_ = approve_candidate(
-        candidate, store=store, trios_path=trios_path, validate_sql=validated.append
+        candidate,
+        store=store,
+        trios_path=trios_path,
+        validate_sql=validated.append,
+        report="Revenue = SUM(sale_price) of sold items, grouped by month.",
     )
     assert validated == [REVENUE_SQL]
+    assert trio_.source["approved_by"] == "analyst"
     assert trio_.id == "monthly_revenue_in_2024" and trio_.status == "approved"
     assert trio_.source["candidate_id"] == candidate.id and trio_.source["trace_id"] == "t1"
     assert [t.id for t in load_trios(trios_path)][-1] == trio_.id
@@ -295,6 +300,19 @@ def test_approval_with_edits_and_unique_id(tmp_path):
     )
     assert new.id == "monthly_revenue_2" and new.sql == ("SELECT 1", "SELECT 2")
     assert new.report == "Revenue = sold items." and new.tags == ("revenue",)
+
+
+def test_the_users_answer_never_becomes_the_notes(tmp_path):
+    # The answer holds the numbers of the author's brands; trios are shown to every user.
+    trios_path = tmp_path / "trios.json"
+    golden.save_trios(trios_path, TRIOS[:1])
+    store = CandidateStore(tmp_path / "cand.jsonl")
+    candidate = add(store, answer_summary="Diesel revenue was $24,974.")
+    with pytest.raises(ValueError, match="method notes"):
+        approve_candidate(
+            candidate, store=store, trios_path=trios_path, validate_sql=lambda sql: None
+        )
+    assert len(load_trios(trios_path)) == 1
 
 
 def test_invalid_sql_is_not_approved(tmp_path):

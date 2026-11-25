@@ -43,6 +43,7 @@ from retail_agent.graph.nodes import (
     tool_error_message,
 )
 from retail_agent.graph.state import AgentState
+from retail_agent.knowledge import promotion
 from retail_agent.knowledge.golden import CandidateStore, GeminiEmbedder, GoldenIndex
 from retail_agent.knowledge.schema import SchemaCatalog
 from retail_agent.llm import build_chat_model
@@ -390,9 +391,33 @@ class AgentSession:
                 )
         return state, answer
 
+    def _rate_precedents(self, state: dict[str, Any], rating: str) -> None:
+        """Count the rating against the Golden Bucket trios that were in the answer's prompt;
+        trios with bad ratings from several users are deprecated (`knowledge.promotion`)."""
+        storage, trio_ids = self.deps.tool_ctx.storage, state.get("golden_ids") or []
+        trace_id = state.get("trace_id")
+        if storage is None or not trio_ids or not trace_id:
+            return
+        try:
+            deprecated = promotion.record_feedback(
+                storage,
+                self.deps.settings.golden_trios_path,
+                trio_ids=trio_ids,
+                user_id=self.user.user_id,
+                rating=rating,
+                trace_id=trace_id,
+                index=self.deps.golden,
+            )
+        except Exception as exc:
+            log_event("golden_feedback_failed", level="warning", error=type(exc).__name__)
+            return
+        log_event("golden_feedback", rating=rating, trio_ids=trio_ids, deprecated=deprecated)
+
     def mark_bad(self, comment: str = "") -> FeedbackResult:
         """`/bad [comment]`: logged for analysis; "too long" and the like adjust the profile."""
-        _, answer = self._feedback("bad", comment)
+        state, answer = self._feedback("bad", comment)
+        if answer:
+            self._rate_precedents(state, "bad")
         if not answer:
             return FeedbackResult("Thanks for the feedback! There is no answer to rate yet.")
         hint = "" if comment else " Add a comment next time, e.g. /bad too long."
@@ -402,6 +427,8 @@ class AgentSession:
         """`/good` on the last answer: if it is backed by successful SQL, it becomes a
         Golden Bucket candidate for analysts to review (question, SQL, answer summary)."""
         state, answer = self._feedback("good")
+        if answer:
+            self._rate_precedents(state, "good")
         trace_id = state.get("trace_id")
         thanks = "Thanks for the feedback!"
         messages = state.get("messages") or []
@@ -426,12 +453,14 @@ class AgentSession:
             user_role=self.user.role,
             trace_id=trace_id,
             tags=context.get("entities") or [],
+            user_id=self.user.user_id,
+            brands=self.user.brands,
         )
         if candidate is None:
             return FeedbackResult(f"{thanks} This answer is already waiting for review.")
         return FeedbackResult(
-            f"{thanks} The question and its SQL were sent to analysts for review as a "
-            f"candidate example ({candidate.id}).",
+            f"{thanks} The question and its SQL were queued as a candidate example for "
+            f"the analysts' knowledge base ({candidate.id}); it is checked automatically.",
             candidate_id=candidate.id,
         )
 

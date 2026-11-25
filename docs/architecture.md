@@ -48,7 +48,7 @@ flowchart TB
         CLI[CLI]
         WEB[Web app]
         SLACK[Slack / Teams bot]
-        ADMIN[Admin UI<br/>persona, Golden Bucket review]
+        ADMIN[Admin UI<br/>persona, Golden Bucket audit]
     end
 
     subgraph Edge
@@ -325,8 +325,14 @@ flowchart LR
     subgraph SystemLevel["System level"]
         FB -->|good answer + successful SQL| CAND[[golden-candidates topic]]
         CAND --> QUEUE[(Candidates)]
-        QUEUE --> REV[Analyst review in Admin UI<br/>SQL dry-run, edit notes]
-        REV -->|approve| GB[(Golden Bucket GCS)]
+        QUEUE --> PROMO[Promotion worker<br/>rate limit, SQL Guard under author scope,<br/>dry run + run, dedupe, LLM judge,<br/>method notes, number-leak check]
+        PROMO -->|auto-approve| GB[(Golden Bucket GCS)]
+        PROMO -->|unsure| QUAR[(Quarantine)]
+        QUAR --> AUDIT[Sample audit in Admin UI]
+        GB -->|sampled| AUDIT
+        AUDIT -->|deprecate| GB
+        FB -->|👎 on answers using a trio| DEP[Auto-deprecation<br/>bad from 2+ users and bad > good]
+        DEP --> GB
         AN[Analysts write new trios] --> GB
         GB -->|object finalize| IDX[Indexer: embed, dedupe,<br/>metadata, deprecate old]
         IDX --> VS[(Vector index)]
@@ -345,10 +351,12 @@ flowchart LR
   at least two different turns and a confidence above 0.7, and old signals decay (half-life 30
   days). The profile goes into every prompt; the current message overrides it, and it can never
   override safety rules.
-- **System level:** the agent does not change itself silently. Good interactions become
-  candidates, analysts approve them into the Golden Bucket, and failures are clustered into a
-  report that drives prompt, glossary and trio changes. Every change passes the eval gate first.
-  Approved trios double as eval cases with reference SQL.
+- **System level:** good interactions become candidates and an automatic pipeline promotes them
+  into the Golden Bucket (no human approval in the loop: it would not scale); people audit only
+  what the pipeline was unsure about and a sample of what it approved. Trios whose answers collect
+  negative feedback are deprecated automatically. Failures are clustered into a report that drives
+  prompt, glossary and trio changes. Every change passes the automated eval gate first; approved
+  trios double as eval cases with reference SQL.
 
 ---
 
@@ -415,7 +423,7 @@ flowchart LR
         P6[SQLite app.db:<br/>reports, conversations,<br/>preferences, audit]
         P7[SQLite checkpoints.db]
         P8[golden_trios.json +<br/>numpy embeddings index]
-        P9[golden_candidates.jsonl +<br/>review_candidates.py]
+        P9[golden_candidates.jsonl +<br/>promote_candidates.py, audit script]
         P10[In-process rate limiter, caches]
         P11[config/persona.md,<br/>re-read every turn]
         P12[logs/agent.jsonl +<br/>llm_payloads.jsonl + LangSmith]
@@ -431,7 +439,7 @@ flowchart LR
         R6[Firestore collections]
         R7[Firestore checkpointer]
         R8[GCS Golden Bucket +<br/>Vector Search]
-        R9[Pub/Sub candidates +<br/>Admin UI review]
+        R9[Pub/Sub candidates +<br/>promotion worker, sample audit]
         R10[Memorystore Redis]
         R11[Persona in Firestore,<br/>versioned, Admin UI]
         R12[Cloud Logging / Trace / Monitoring<br/>+ LangSmith + BigQuery sink]
@@ -473,7 +481,7 @@ graph, the tools or the prompt.
 | User preferences and signals | `data/app.db` `user_preferences`, `preference_signals` | Firestore + Redis cache | Owner (view, change, forget), the agent | Signals decay; forgotten on request or after 12 months inactive | No (whitelisted values only) |
 | Golden Bucket trios | `data/golden_trios.json` (15 trios) | GCS (versioned objects) | Analysts write, agent reads | Versioned; deprecated trios kept for audit | No |
 | Golden index | `data/golden_index.npz` (rebuilt when trios change) | Vertex AI Vector Search | Agent, indexer | Rebuilt from GCS | No |
-| Golden candidates | `data/golden_candidates.jsonl` | Firestore `golden_candidates` | Analysts | Until reviewed + 90 days | No (masked) |
+| Golden candidates | `data/golden_candidates.jsonl` | Firestore `golden_candidates` | Promotion worker, auditors | Until promoted or rejected + 90 days | No (masked) |
 | Persona | `config/persona.md` | Firestore `persona_versions` | Content owners edit, agent reads | All versions kept | No |
 | Glossary, PII policy, users and access groups | `config/*.yaml` | Firestore / directory groups | Admins | Versioned | No |
 | Schema cache | `data/schema_cache.json` (7 days) | Redis | Agent | 7 days | No (column names only) |
@@ -499,7 +507,7 @@ graph, the tools or the prompt.
 | Agent | Firestore | gRPC | Checkpoints, reports, preferences, audit (transactions for delete + audit) |
 | Agent | Redis | RESP | Rate limiter tokens per model, profile and query caches, circuit state |
 | Agent | Cloud DLP | REST | `content.inspect` / `deidentify` on answers and reports |
-| Admin UI | Admin API | HTTPS behind IAP | Persona drafts, preview, publish; candidate review |
+| Admin UI | Admin API | HTTPS behind IAP | Persona drafts, preview, publish; Golden Bucket audit (quarantine, sampled trios) |
 
 ### Asynchronous events (Pub/Sub)
 
@@ -511,7 +519,7 @@ handlers are idempotent by `event_id`.
 |---|---|---|---|
 | `feedback` | Agent (on 👍/👎) | Preference worker; candidate builder; metrics | `{"trace_id", "conversation_id", "user_id", "rating": "good" \| "bad", "comment"}` |
 | `preference-signals` | Agent, after the turn | Preference worker | `{"user_id", "signals": [{"key": "detail_level", "value": "brief", "kind": "reformat_request", "weight": 1.0, "evidence": "asked for shorter, previous answer 412 words"}]}` |
-| `golden-candidates` | Candidate builder (good feedback + successful SQL) | Candidate store, Admin UI queue | `{"candidate_id", "question", "sql": [...], "answer_summary", "user_role", "trace_id"}` (masked) |
+| `golden-candidates` | Candidate builder (good feedback + successful SQL) | Candidate store, promotion worker | `{"candidate_id", "question", "sql": [...], "answer_summary", "user_role", "trace_id"}` (masked) |
 | `trio-ingested` | GCS object finalize (approved or analyst-written trio) | Indexer job | `{"bucket", "object", "generation"}`; the indexer embeds, deduplicates (cosine > 0.95 with an existing trio goes back to review), writes metadata (tables, metrics, schema version, author, status) |
 | `persona-published` | Admin API | Agent instances (invalidate cache) | `{"version", "hash", "published_by"}` |
 | `eval-completed` | Eval job | CI/CD, dashboards | `{"run_id", "commit", "models", "summary": {"passed", "total", "security_pass_rate", "judge_mean", "accuracy"}}` |

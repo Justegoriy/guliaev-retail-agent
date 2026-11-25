@@ -133,11 +133,29 @@ Each requirement below has the production design, then what the prototype implem
   current schema version returns the top 3, which go into the prompt as "analyst precedents:
   follow their interpretation and metric definitions, adapt the SQL". Retrieval is part of building
   the prompt, not a tool, so it costs no extra model call.
-- *Updating over time.* Three sources: analysts add trios directly; the agent proposes candidates
-  from good interactions (👍 on an answer with successful SQL), which analysts review in the Admin UI
-  (SQL is dry-run, notes are edited, then approve or reject); and the failure report shows topics
-  where the agent struggles, which tells analysts which trios to write. Trios are deprecated when
-  the schema changes or when their answers get negative feedback, and versions are kept.
+- *Updating over time.* Three sources: analysts add trios directly; good interactions (👍 on an
+  answer with successful SQL) become candidates; and the failure report shows topics where the
+  agent struggles. Candidates are promoted by an automatic pipeline, since approving each one by
+  hand does not scale ([knowledge/promotion.py](../src/retail_agent/knowledge/promotion.py)):
+  1. *Rate limit*: at most 5 candidates per author a day (protects against flooding or poisoning).
+  2. *SQL*: every query passes the SQL Guard under the author's own access scope and a dry run,
+     then runs; an error or an empty result rejects the candidate.
+  3. *Duplicates*: a question with cosine 0.92 or more to an approved trio is rejected.
+  4. *Judge*: one Flash-Lite call sees the question, the SQL and up to 10 result rows (PII-masked)
+     and the author's scope, scores whether the SQL answers the question (1-5) and whether the case
+     is reusable, and writes the method notes: interpretation, metric definitions, tables, filters
+     and steps, without numbers.
+  5. *Leak check* (deterministic): the notes may not repeat numbers of the answer or the results,
+     amounts or percentages; the author's brands are dropped from the tags. Trios are shown to every
+     user, while the answer holds the numbers of the author's brands, so the answer itself is never
+     stored in a trio.
+
+  Score 4-5, reusable and clean notes: approved automatically. Score 3, or notes that fail the leak
+  check: quarantined for the audit. Lower: rejected. A share of auto-approved trios (20%) is sampled
+  for a human audit, which can deprecate them; people no longer gate the flow, they check its
+  quality. Trios are deprecated automatically when answers whose prompt contained them get 👎 from
+  at least two users and more 👎 than 👍 (the trio ids of each turn are kept in the conversation
+  state), when the schema changes, or when they fail the eval gate. Versions are kept.
 - Approved trios with reference SQL are also eval cases (R6).
 
 **Prototype.**
@@ -154,10 +172,16 @@ Each requirement below has the production design, then what the prototype implem
   `data/golden_index.npz` by a hash of what is embedded, so editing a report does not cost API
   calls. If embeddings fail, retrieval falls back to keyword overlap (for the session if the index
   cannot be built, for 5 minutes if a query fails), with a `golden_degraded` event.
-- Updating: `/good` on an answer with successful SQL writes a masked candidate to
-  `data/golden_candidates.jsonl`; [scripts/review_candidates.py](../scripts/review_candidates.py)
-  lets an analyst approve (SQL Guard + dry run, notes, tags, id), edit or reject. The index is
-  rebuilt at the next start.
+- Updating: `/good` on an answer with successful SQL writes a masked candidate with the author's
+  scope to `data/golden_candidates.jsonl`;
+  [scripts/promote_candidates.py](../scripts/promote_candidates.py) runs the pipeline above (in
+  production a Pub/Sub worker). [scripts/review_candidates.py](../scripts/review_candidates.py) is
+  the audit: quarantined candidates (approve, edit, reject) and `--audit` for sampled
+  auto-approved trios (keep or deprecate). `/bad` and `/good` are counted against the trios in the
+  answer's prompt (`trio_feedback` table) and deprecate a trio as soon as the rule is met; it is
+  dropped from the live index at once. New trios are indexed at the next start. Verified live: a
+  `denim_manager` question rated `/good` was auto-approved with score 5, notes without numbers and
+  without the author's brands in the tags.
 
 ### R2 Safety, PII masking, per-user data access
 
@@ -329,7 +353,8 @@ one year.
 - [scripts/failure_report.py](../scripts/failure_report.py) groups failed turns by cause and lists
   the worst turns and repeated questions with trace ids. That output drives fixes: a new glossary
   entry, a schema note, a prompt rule, or a request to analysts for a trio.
-- Good interactions become Golden Bucket candidates with human review (R1).
+- Good interactions become Golden Bucket candidates, promoted automatically with a sample
+  audit; trios with negative feedback are deprecated automatically (R1).
 - Every change to prompts, models or knowledge passes the eval suite (R6) before release; in
   production that is a CI/CD gate followed by a canary.
 - The agent does not rewrite its own prompt automatically: unreviewed self-modification would be
@@ -581,7 +606,8 @@ Limitations:
 - PII masking is regex-based (no DLP); an unusual PII format in free text could be missed by layer 3
   (layers 1 and 2 do not depend on it).
 - SQLite and in-process caches and rate limiters: a single process, not shared between instances.
-- The Golden Bucket is a 15-trio JSON file with an in-memory index; candidate review is a CLI script.
+- The Golden Bucket is a 15-trio JSON file with an in-memory index; promotion runs on demand
+  (`scripts/promote_candidates.py`), not on every new candidate.
 - No charts (D22), no e-mail; reports are markdown only.
 - The free-tier Gemini quota (about 20 requests per day for Flash) is easily exhausted; the agent
   then works on Flash-Lite, with lower quality on complex multi-step questions. The latest eval
@@ -594,7 +620,8 @@ What I would do next, in order:
    not depend on the SQL rewrite alone.
 2. Firestore checkpointer and stores, Redis for limits and caches.
 3. Cloud DLP on answers and reports.
-4. Pub/Sub workers for preference signals and candidates; Admin UI for persona and review.
+4. Pub/Sub workers for preference signals and candidate promotion; Admin UI for persona and
+   the Golden Bucket audit.
 5. Grow the eval to about 100 cases from approved trios and real (masked) questions, make it the
    deploy gate, and add per-category latency and cost budgets.
 6. `generate_chart` and `send_report_email` through the registry.

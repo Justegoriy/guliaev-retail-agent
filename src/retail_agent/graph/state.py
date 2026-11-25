@@ -39,3 +39,4 @@ class AgentState(MessagesState):
     analysis_context: AnalysisContext | None
     history_summary: str | None
     session_report_ids: Annotated[list[str], append_unique]  # saved here; deleted ones stay
+    golden_ids: list[str]  # Golden Bucket trios in this turn's prompt (for feedback)

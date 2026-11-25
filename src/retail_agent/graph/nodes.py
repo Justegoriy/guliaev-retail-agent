@@ -109,7 +109,8 @@ class AgentNodes:
         self.deps = deps
         self._aux_runnables: dict[type[BaseModel], Runnable[Any, Any]] = {}
         self._aux_lock = threading.Lock()
-        self._prompt_cache: tuple[str, str] | None = None  # (trace_id, system prompt)
+        # (trace_id, system prompt, ids of the Golden Bucket trios in it)
+        self._prompt_cache: tuple[str, str, list[str]] | None = None
 
     # -- helpers ----------------------------------------------------------------------
 
@@ -194,8 +195,14 @@ class AgentNodes:
             has_analysis_context=bool(inputs.analysis_context),
             pii_note=inputs.pii_request,
         )
-        self._prompt_cache = (trace_id, prompt)
+        self._prompt_cache = (trace_id, prompt, [p.trio.id for p in precedents])
         return prompt
+
+    def golden_ids(self, state: AgentState) -> list[str]:
+        cache = self._prompt_cache
+        if cache and cache[0] == (state.get("trace_id") or ""):
+            return list(cache[2])
+        return []
 
     # -- nodes ------------------------------------------------------------------------
 
@@ -257,7 +264,7 @@ class AgentNodes:
             response = AIMessage(content=response.text or BUDGET_ANSWER, id=response.id)
         if not response.tool_calls:
             response = mask_ai_message(response, where="agent_answer")
-        return {"messages": [response]}
+        return {"messages": [response], "golden_ids": self.golden_ids(state)}
 
     def output_guard(self, state: AgentState) -> dict[str, Any]:
         last = state["messages"][-1]

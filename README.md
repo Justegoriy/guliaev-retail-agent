@@ -308,7 +308,8 @@ are in [docs/technical_design.md](docs/technical_design.md)):
   and the outcome. `/trace`, `/trace --full`, `/stats`, and LangSmith if configured.
 
 Also implemented, in simplified form: the Golden Bucket (15 analyst trios, embeddings retrieval,
-`/good` candidates reviewed with `scripts/review_candidates.py`), user preferences (explicit and
+`/good` candidates promoted automatically with `scripts/promote_candidates.py`, audited with
+`scripts/review_candidates.py`), user preferences (explicit and
 learned from behaviour), persona in [config/persona.md](config/persona.md) (edit it during a
 session: the next answer uses it), chat history with `/resume`, the eval suite and the failure
 report.
@@ -404,7 +405,7 @@ src/retail_agent/
 config/                           persona, glossary, users, PII policy, preferences
 data/golden_trios.json            Golden Bucket seed
 evals/                            eval cases, runner, results
-scripts/                          review_candidates.py, failure_report.py, retitle_conversations.py, check_*.py
+scripts/                          promote_candidates.py, review_candidates.py, failure_report.py, retitle_conversations.py, check_*.py
 tests/                            unit and network tests
 docs/                             architecture, technical design, assumptions
 ```

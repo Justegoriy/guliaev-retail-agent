@@ -78,6 +78,16 @@ CREATE TABLE IF NOT EXISTS preference_signals (
     ts TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS preference_signals_user ON preference_signals (user_id, key);
+
+-- Ratings of answers whose prompt contained a Golden Bucket trio (automatic deprecation).
+CREATE TABLE IF NOT EXISTS trio_feedback (
+    trio_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    rating TEXT NOT NULL CHECK (rating IN ('good', 'bad')),
+    trace_id TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    PRIMARY KEY (trio_id, trace_id)
+);
 """
 
 MAX_TITLE_CHARS = 200
@@ -515,6 +525,28 @@ class Storage:
         return self._write(
             "DELETE FROM preference_signals WHERE user_id = ? AND key = ?", (user_id, key)
         )
+
+    # -- Golden Bucket trio feedback ---------------------------------------------------------
+
+    def add_trio_feedback(self, trio_id: str, user_id: str, rating: str, trace_id: str) -> None:
+        """One rating per answer and trio; rating the same answer again replaces it."""
+        self._write(
+            "INSERT INTO trio_feedback (trio_id, user_id, rating, trace_id, ts) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT (trio_id, trace_id) DO UPDATE SET "
+            "rating = excluded.rating, ts = excluded.ts",
+            (trio_id, user_id, rating, trace_id, _now()),
+        )
+
+    def trio_feedback_counts(self, trio_id: str) -> tuple[int, int, int]:
+        """(good ratings, bad ratings, distinct users with a bad rating) of a trio."""
+        (row,) = self._query(
+            "SELECT COUNT(*) FILTER (WHERE rating = 'good') AS good, "
+            "COUNT(*) FILTER (WHERE rating = 'bad') AS bad, "
+            "COUNT(DISTINCT CASE WHEN rating = 'bad' THEN user_id END) AS bad_users "
+            "FROM trio_feedback WHERE trio_id = ?",
+            (trio_id,),
+        )
+        return int(row["good"]), int(row["bad"]), int(row["bad_users"])
 
     def audit_entries(self, user_id: str | None = None, limit: int = 100) -> list[AuditEntry]:
         """Newest first."""
