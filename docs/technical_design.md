@@ -558,7 +558,9 @@ trace sampling for weekly manual review.
 - The whole conversation (messages, tool calls and results, analysis context, pending
   confirmations) is in the LangGraph checkpoint (`thread_id = conversation_id`) and survives
   restarts. `/history`, `/resume <id>` (unique prefix), `/new`, `--continue`. Conversations belong
-  to their owner; someone else's id is refused and not revealed.
+  to their owner; someone else's id is refused and not revealed. In the web app a conversation
+  can be deleted (bin icon, then Delete to confirm): its checkpoint thread and row are removed for
+  good, reports saved from it stay in the library, and the audit log records the id.
 - Follow-ups ("and monthly?", "only Jeans", "why?", "make a report from this") use the analysis
   context in the prompt (last question, SQL as written by the model, period, filters, result
   summary); the model modifies the previous SQL, which passes the guard and ACL again. Ambiguous

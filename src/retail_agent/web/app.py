@@ -135,14 +135,26 @@ def conversations_panel(session: AgentSession) -> None:
         st.rerun()
     for c in session.conversations(limit=CONVERSATIONS_SHOWN):
         current = c.id == session.conversation_id
-        title = c.title if len(c.title) <= 40 else c.title[:39] + "…"
-        clicked = st.button(
+        title = c.title if len(c.title) <= 36 else c.title[:35] + "…"
+        open_col, delete_col = st.columns([6, 1], gap="small", vertical_alignment="center")
+        clicked = open_col.button(
             title,
             key=f"conv_{c.id}",
             type="primary" if current else "secondary",
             help=f"{c.turns} turns · updated {web.short_date(c.updated_at)} UTC",
             width="stretch",
         )
+        if delete_col.button(
+            "",
+            key=f"del_{c.id}",
+            icon=":material/delete:",
+            help="Delete this conversation",
+            type="tertiary",
+        ):
+            state.delete_conversation = c.id
+            st.rerun()
+        if state.get("delete_conversation") == c.id:
+            confirm_conversation_deletion(session, c)
         if clicked and not current:
             close_pending()
             session.switch_conversation(c.id)
@@ -150,6 +162,29 @@ def conversations_panel(session: AgentSession) -> None:
             log_event("conversation_resumed", turns=c.turns, client="web")
             reset_view_state()
             st.rerun()
+
+
+def confirm_conversation_deletion(session: AgentSession, conversation) -> None:
+    """Deleting a conversation cannot be undone: ask first, right under it."""
+    st.warning(
+        f"Delete **{conversation.title}** and its history for good? "
+        "Reports saved from it stay in your library."
+    )
+    yes_col, no_col = st.columns(2)
+    if yes_col.button("Delete", key=f"del_yes_{conversation.id}", type="primary", width="stretch"):
+        was_current = conversation.id == session.conversation_id
+        if was_current:
+            close_pending()
+        session.delete_conversation(conversation.id)
+        state.delete_conversation = None
+        if was_current:  # the session moved to a new, empty conversation
+            web.bind_context(session)
+            reset_view_state()
+        state.flash = ("success", "Conversation deleted.")
+        st.rerun()
+    if no_col.button("Cancel", key=f"del_no_{conversation.id}", width="stretch"):
+        state.delete_conversation = None
+        st.rerun()
 
 
 def status_panel(backend: web.Backend) -> None:

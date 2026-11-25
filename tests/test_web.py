@@ -257,3 +257,39 @@ def test_bad_token_in_the_url_is_refused(h, app):
     assert any("Sign-in failed: invalid token" in e for e in errors)
     assert not any("could not start" in e for e in errors)
     assert not app.at.chat_input
+
+
+def conversation_ids(h):
+    return [c.id for c in h.storage.list_conversations("ceo")]
+
+
+def test_conversation_is_deleted_after_confirmation(h, app):
+    app.run()
+    h.model.script.append(AIMessage("First answer."))
+    app.send("first question")
+    app.click("new_conversation")
+    h.model.script.append(AIMessage("Second answer."))
+    app.send("second question")
+    current, old = conversation_ids(h)  # newest first
+
+    app.click(f"del_{old}")
+    assert any("for good" in w.value for w in app.at.sidebar.warning)
+    app.click(f"del_no_{old}")  # cancel keeps it
+    assert old in conversation_ids(h) and not app.at.sidebar.warning
+
+    app.click(f"del_{old}")
+    app.click(f"del_yes_{old}")
+    assert conversation_ids(h) == [current]
+    assert "Second answer." in app.texts()  # the open conversation is untouched
+    assert "Conversation deleted." in [s.value for s in app.at.success]
+
+
+def test_deleting_the_open_conversation_clears_the_chat(h, app):
+    app.run()
+    h.model.script.append(AIMessage("Only answer."))
+    app.send("only question")
+    (only,) = conversation_ids(h)
+    app.click(f"del_{only}")
+    app.click(f"del_yes_{only}")
+    assert conversation_ids(h) == []
+    assert "Only answer." not in app.texts()

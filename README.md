@@ -274,7 +274,8 @@ python -m retail_agent.web --server.port 8600
 The same agent as the CLI, in a browser. You pick a demo user in the sidebar (a token is
 issued and verified for them, as in the CLI) or open the page with `?token=<jwt>`; each browser
 tab has its own session for that user. The sidebar also has the
-conversation list (new / continue) and the system status (Gemini, BigQuery, model, LangSmith).
+conversation list (new / continue / delete: the bin icon next to a conversation, then Delete to
+confirm) and the system status (Gemini, BigQuery, model, LangSmith).
 
 - **Chat**: progress stages while the agent works, the trace id (and a LangSmith link when
   tracing is on), 👍 / 👎 with an optional comment. Deleting or exporting reports shows the

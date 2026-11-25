@@ -322,6 +322,34 @@ class AgentSession:
             return exact[0]
         return matches[0] if len(matches) == 1 else None
 
+    def delete_conversation(self, conversation_id: str) -> bool:
+        """Delete one of the user's conversations for good: its checkpoint thread (messages,
+        tool results, pending confirmations) and its row. Reports saved in it stay in the
+        library. False if there is no such conversation; another user's one raises
+        `ConversationAccessError`. Deleting the current conversation starts a new one."""
+        storage = self.storage
+        if storage is None:
+            return False
+        conversation = storage.get_conversation(conversation_id)
+        if conversation is None:
+            return False
+        if conversation.owner_user_id != self.user.user_id:
+            log_event("conversation_access_denied", level="warning", target=conversation_id)
+            raise ConversationAccessError(conversation_id)
+        self.graph.checkpointer.delete_thread(conversation_id)
+        storage.delete_conversation(conversation_id)
+        storage.audit(
+            self.user.user_id,
+            "conversation_deleted",
+            [conversation_id],
+            {"turns": conversation.turns},
+            trace_id=logger.trace_id_var.get(),
+        )
+        log_event("conversation_deleted", turns=conversation.turns)
+        if conversation_id == self.conversation_id:
+            self.new_conversation()
+        return True
+
     def last_conversation(self) -> Conversation | None:
         recent = self.conversations(limit=1)
         return recent[0] if recent else None
