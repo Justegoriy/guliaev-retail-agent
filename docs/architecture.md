@@ -478,10 +478,11 @@ graph, the tools or the prompt.
 | Conversation history and state (messages, tool calls, analysis context, pending confirmations) | `data/checkpoints.db` (LangGraph SqliteSaver) | Firestore checkpointer, encrypted at rest | The owner (checked on resume); on-call via break-glass | 90 days after the last activity (purged at start in the prototype, Firestore TTL in production) | No (masked before saving) |
 | Conversation index (owner, title, turns) | `data/app.db` `conversations` | Firestore `conversations` | Owner | Same as history | No |
 | Saved reports | `data/app.db` `reports` (question, answer in Markdown, source SQL, entities) | Firestore `reports` + GCS for large artifacts | Owner only (no sharing, D13) | Until the owner deletes them (hard delete, no recovery window) | No (masked on save) |
-| Exports | `exports/<id>.md` | GCS bucket with signed URLs | Owner | 30 days | No |
+| Exports | `exports/<id>.md` | GCS bucket with signed URLs | Owner | 30 days (the report stays in the library) | No |
 | Audit log (confirmations, deletions, exports) | `data/app.db` `audit_log` | Firestore `audit` + Cloud Audit Logs, exported to BigQuery | Security, on-call (read-only) | 1 year (purged on open in the prototype, Firestore TTL in production) | No |
-| User preferences and signals | `data/app.db` `user_preferences`, `preference_signals` | Firestore + Redis cache | Owner (view, change, forget), the agent | Signals decay; forgotten on request or after 12 months inactive | No (whitelisted values only) |
+| User preferences and signals | `data/app.db` `user_preferences`, `preference_signals` | Firestore + Redis cache | Owner (view, change, forget), the agent | Signals 180 days; inferred preferences 1 year after the last update; explicit ones until changed or forgotten | No (whitelisted values only) |
 | Golden Bucket trios | `data/golden_trios.json` (15 trios) | GCS (versioned objects) | Analysts write, agent reads | Versioned; deprecated trios kept for audit | No |
+| Ratings of Golden Bucket trios | `data/app.db` `trio_feedback` | Firestore | Promotion worker | 1 year | No (ids only) |
 | Golden index | `data/golden_index.npz` (rebuilt when trios change) | Vertex AI Vector Search | Agent, indexer | Rebuilt from GCS | No |
 | Golden candidates | `data/golden_candidates.jsonl` | Firestore `golden_candidates` | Promotion worker, auditors | 90 days from creation (approved ones live on as trios with method notes only) | No (masked) |
 | Persona | `config/persona_draft.md` -> `config/persona.md`, versions in `config/persona_versions/` | Firestore `persona_versions` | Content owners edit, agent reads | All versions kept | No |
@@ -489,7 +490,7 @@ graph, the tools or the prompt.
 | Schema cache | `data/schema_cache.json` (7 days) | Redis | Agent | 7 days | No (column names only) |
 | Query result cache | In-memory, 10 min, 100 entries | Redis, keyed by rewritten SQL (so per access scope) | Agent | 10 min | No (masked results) |
 | Event log | `logs/agent.jsonl` | Cloud Logging, sink to BigQuery | On-call, analysts of agent quality | 90 days (they hold masked messages and SQL) | No (masked) |
-| Full model conversations | `logs/llm_payloads.jsonl` (`LOG_LLM_PAYLOADS`) | Sampled into Cloud Logging / LangSmith | On-call | 90 days in the prototype; 14 days sampled in production | No (masked) |
+| Full model conversations | `logs/llm_payloads.jsonl` (`LOG_LLM_PAYLOADS`) | Sampled into Cloud Logging / LangSmith | On-call | 30 days | No (masked) |
 | LLM traces | LangSmith (optional) | LangSmith (or self-hosted Langfuse) | On-call, prompt engineers | 14 to 30 days | No (anonymizer) |
 | Eval results | `evals/results/<ts>.json` | GCS + BigQuery table per run | Engineering | Kept for comparing versions | No |
 | Secrets | `.env` (not committed) | Secret Manager | Service accounts | Rotated | n/a |

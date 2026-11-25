@@ -107,3 +107,48 @@ def test_retention_period_is_configurable(tmp_path):
     age_conversation(h, "week_old", 8)
     result = retention.purge_expired(h.settings, h.storage, h.session.graph.checkpointer, now=NOW)
     assert result.conversations == 1
+
+
+def test_payloads_and_exports_keep_30_days(tmp_path):
+    import os
+
+    h = Harness(tmp_path)
+    write_lines(h.settings.llm_payload_log_path, 45, 31, 29)
+    write_lines(h.settings.log_path, 45, 31, 29)  # the event log keeps 90 days
+    h.settings.exports_dir.mkdir(parents=True)
+    old, new = h.settings.exports_dir / "old.md", h.settings.exports_dir / "new.md"
+    for path, days in ((old, 31), (new, 1)):
+        path.write_text("# report", encoding="utf-8")
+        stamp = (NOW - timedelta(days=days)).timestamp()
+        os.utime(path, (stamp, stamp))
+    result = retention.purge_expired(h.settings, h.storage, h.session.graph.checkpointer, now=NOW)
+    assert (result.payload_lines, result.log_lines, result.exports) == (2, 0, 1)
+    assert not old.exists() and new.exists()
+
+
+def test_preference_data_and_trio_ratings(tmp_path):
+    h = Harness(tmp_path)
+    s = h.storage
+    s.add_signal("alice", "format", "table", weight=1, kind="usage", ts=iso(181))
+    s.add_signal("alice", "format", "table", weight=1, kind="usage", ts=iso(10))
+    s.upsert_preference(
+        "alice", "format", "table", source="explicit", confidence=1, evidence_count=1
+    )
+    s.upsert_preference(
+        "alice", "detail_level", "brief", source="inferred", confidence=0.8, evidence_count=2
+    )
+    s.upsert_preference(
+        "bob", "detail_level", "deep", source="inferred", confidence=0.8, evidence_count=2
+    )
+    s._write("UPDATE user_preferences SET updated_at = ? WHERE user_id = 'alice'", (iso(400),))
+    s.add_trio_feedback("monthly_revenue", "alice", "bad", "t-old")
+    s.add_trio_feedback("monthly_revenue", "bob", "bad", "t-new")
+    s._write("UPDATE trio_feedback SET ts = ? WHERE trace_id = 't-old'", (iso(366),))
+
+    result = retention.purge_expired(h.settings, h.storage, h.session.graph.checkpointer, now=NOW)
+    assert (result.signals, result.inferred_preferences, result.trio_ratings) == (1, 1, 1)
+    assert len(s.signals("alice")) == 1
+    # Explicit preferences stay until the user changes or forgets them, however old.
+    assert {p.key for p in s.get_preferences("alice")} == {"format"}
+    assert {p.key for p in s.get_preferences("bob")} == {"detail_level"}
+    assert s.trio_feedback_counts("monthly_revenue") == (0, 1, 1)

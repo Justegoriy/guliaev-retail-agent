@@ -320,8 +320,8 @@ Also implemented, in simplified form: the Golden Bucket (15 analyst trios, embed
 learned from behaviour), the persona (edit [config/persona_draft.md](config/persona_draft.md) and
 run `python scripts/publish_persona.py publish`: it goes live, without a restart, only if it passes
 the automated quality gate), chat history with `/resume`, the eval suite with its gate
-(`python evals/run_eval.py --gate`), the failure report, and retention (chat history and logs
-90 days, audit log one year, reports until deleted).
+(`python evals/run_eval.py --gate`), the failure report, and retention (chat history 90 days, model
+payloads and exports 30 days, audit log one year, reports until deleted).
 
 ## Tests and evaluation
 
@@ -396,8 +396,8 @@ the quality gate into `persona.md`, which is re-read every turn),
 `glossary.yaml` (metric definitions), `users.yaml` (users and their brands), `pii_policy.yaml`
 (personal fields and patterns), `preferences.yaml` (allowed preference keys and thresholds).
 
-Data files are created on first run (chat history and logs are kept 90 days, the audit log one
-year, reports until deleted): `data/app.db` (reports, conversations, preferences, audit),
+Data files are created on first run (chat history and logs 90 days, model payloads and exports
+30 days, the audit log one year, reports until deleted; see D31): `data/app.db` (reports, conversations, preferences, audit),
 `data/checkpoints.db` (conversation history), `data/golden_index.npz`, `data/schema_cache.json`.
 Delete them to start fresh.
 

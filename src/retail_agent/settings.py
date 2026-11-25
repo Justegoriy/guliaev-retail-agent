@@ -63,8 +63,13 @@ class Settings(BaseSettings):
     # User preferences (keys, values, thresholds)
     preferences_config_path: Path = Path("config/preferences.yaml")
 
-    # Retention: chat history (conversations, checkpoints, logs, candidates); audit is 1 year
-    chat_retention_days: int = Field(90, ge=1)
+    # Retention in days (D31); the audit log is kept one year, saved reports until deleted
+    chat_retention_days: int = Field(90, ge=1)  # conversations, checkpoints, event log, candidates
+    payload_retention_days: int = Field(30, ge=1)  # full model conversations (debugging)
+    export_retention_days: int = Field(30, ge=1)  # exported report files
+    signal_retention_days: int = Field(180, ge=1)  # preference signals (half-life 30 days)
+    inferred_preference_retention_days: int = Field(365, ge=1)  # since the last update
+    trio_feedback_retention_days: int = Field(365, ge=1)  # ratings of Golden Bucket trios
 
     # Storage & logs (relative paths are resolved against the project root)
     app_db_path: Path = Path("data/app.db")

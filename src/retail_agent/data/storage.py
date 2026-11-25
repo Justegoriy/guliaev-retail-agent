@@ -384,6 +384,20 @@ class Storage:
             (title, conversation_id, owner_user_id),
         )
 
+    def purge_older_than(
+        self, *, signals: str, inferred: str, trio_feedback: str
+    ) -> dict[str, int]:
+        """Retention of preference data and trio ratings (ISO cutoffs); returns rows removed.
+        Explicit preferences stay until the user changes or forgets them."""
+        return {
+            "signals": self._write("DELETE FROM preference_signals WHERE ts < ?", (signals,)),
+            "inferred_preferences": self._write(
+                "DELETE FROM user_preferences WHERE source = 'inferred' AND updated_at < ?",
+                (inferred,),
+            ),
+            "trio_ratings": self._write("DELETE FROM trio_feedback WHERE ts < ?", (trio_feedback,)),
+        }
+
     def conversations_inactive_since(self, cutoff: str) -> list[str]:
         """Ids of conversations whose last activity is before `cutoff` (ISO timestamp)."""
         rows = self._query("SELECT id FROM conversations WHERE updated_at < ?", (cutoff,))

@@ -242,11 +242,22 @@ Golden Bucket judge gets masked rows; eval judges get masked answers. One end-to
 an address into the question and the query result, runs a long conversation and scans every
 request to every model and every embedding query.
 
-**Retention** ([retention.py](../src/retail_agent/retention.py), D31): chat history is kept 90
-days after the conversation's last activity. At start the agent removes expired conversations
-with their checkpoint threads, log and payload lines older than 90 days, and Golden Bucket
-candidates older than 90 days. Saved reports stay until the user deletes them; the audit log is
-kept one year.
+**Retention** ([retention.py](../src/retail_agent/retention.py), D31), enforced when the agent
+starts; every period is a setting:
+
+| Data | Kept |
+|---|---|
+| Chat history (conversation row, checkpoint thread), event log, Golden Bucket candidates | 90 days |
+| Full model conversations (debugging), exported report files | 30 days |
+| Preference signals (half-life 30 days: older ones weigh under 2%) | 180 days |
+| Inferred preferences | 1 year after the last update |
+| Ratings of Golden Bucket trios, audit log | 1 year |
+| Saved reports, explicit preferences | until the user deletes or changes them |
+
+Golden Bucket trios hold no personal data and are kept as versioned knowledge. Chat history,
+the audit log and reports follow the client's periods; the rest are ours: debugging payloads
+are the most detailed and are only useful for recent failures, exports are copies of reports
+that stay in the library, signals stop mattering after a few half-lives.
 
 Production adds BigQuery policy tags on PII columns (the agent's service account cannot read them
 at all) and Cloud DLP for free text.

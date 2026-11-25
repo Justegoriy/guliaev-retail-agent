@@ -1,20 +1,28 @@
-"""Data retention (D11, D31): chat history 90 days, audit log 1 year, reports until deleted.
+"""Data retention (D31): how long each kind of data is kept, enforced when the agent starts.
 
-`purge_expired` runs when the agent starts (CLI, web app, eval) and removes everything
-that holds the content of conversations older than `CHAT_RETENTION_DAYS` (by their last
-activity):
+Periods (days are settings):
 
-- the conversation row (title, owner, turn count) and its LangGraph checkpoint thread
-  (messages, tool calls and results, analysis context, pending confirmations);
-- lines of the event log and of the full model payload log older than the cutoff (they
-  hold masked messages, SQL and answers);
-- Golden Bucket candidates created before the cutoff (they hold a question and the
-  answer the user rated); an approved trio keeps only the method notes, not the answer.
+- chat history: the conversation row and its checkpoint thread (messages, tool calls and
+  results, analysis context, pending confirmations), 90 days after the last activity
+  (`CHAT_RETENTION_DAYS`);
+- event log (`agent.jsonl`: masked messages, SQL, outcomes): 90 days (`CHAT_RETENTION_DAYS`);
+- Golden Bucket candidates (a question and the answer a user rated): 90 days;
+- full model conversations (`llm_payloads.jsonl`, debugging): 30 days
+  (`PAYLOAD_RETENTION_DAYS`);
+- exported report files (`exports/`; the report stays in the library): 30 days
+  (`EXPORT_RETENTION_DAYS`);
+- preference signals: 180 days; with a half-life of 30 days older ones weigh under 2%
+  (`SIGNAL_RETENTION_DAYS`);
+- inferred preferences: 1 year after the last update (`INFERRED_PREFERENCE_RETENTION_DAYS`);
+- ratings of Golden Bucket trios (ids only): 1 year (`TRIO_FEEDBACK_RETENTION_DAYS`);
+- audit log: 1 year (`Storage` purges it on open);
+- saved reports: until the user deletes them (hard delete);
+- explicit preferences: until the user changes or forgets them.
 
-Not chat history, so kept: saved reports (until the user deletes them, hard delete),
-the audit log (purged after one year by `Storage`), user preferences and the weights of
-preference signals, ratings of Golden Bucket trios (ids only). In production the same
-rules are Firestore TTL policies and log-bucket retention.
+Golden Bucket trios hold no personal data and are kept as versioned knowledge (deprecated
+ones for the record); eval results are synthetic test data. In production the same rules
+are Firestore TTL policies, log-bucket retention and a LangSmith project retention of 14
+days.
 """
 
 import json
@@ -38,6 +46,10 @@ class RetentionReport:
     log_lines: int = 0
     payload_lines: int = 0
     candidates: int = 0
+    exports: int = 0
+    signals: int = 0
+    inferred_preferences: int = 0
+    trio_ratings: int = 0
 
     def as_dict(self) -> dict[str, int]:
         return dict(self.__dict__)
@@ -83,6 +95,18 @@ def prune_candidates(store: CandidateStore, cutoff: datetime) -> int:
     return len(items) - len(keep)
 
 
+def prune_files(directory: Path, cutoff: datetime, pattern: str = "*.md") -> int:
+    """Delete files in `directory` last modified before `cutoff`."""
+    if not directory.exists():
+        return 0
+    removed = 0
+    for path in directory.glob(pattern):
+        if datetime.fromtimestamp(path.stat().st_mtime, UTC) < cutoff:
+            path.unlink(missing_ok=True)
+            removed += 1
+    return removed
+
+
 def purge_expired(
     settings: Settings,
     storage: Storage,
@@ -92,19 +116,30 @@ def purge_expired(
     now: datetime | None = None,
 ) -> RetentionReport:
     now = now or datetime.now(UTC)
-    cutoff = now - timedelta(days=settings.chat_retention_days)
+
+    def before(days: int) -> datetime:
+        return now - timedelta(days=days)
+
+    cutoff = before(settings.chat_retention_days)
     expired = storage.conversations_inactive_since(_iso(cutoff))
     for conversation_id in expired:
         checkpointer.delete_thread(conversation_id)
         storage.delete_conversation(conversation_id)
+    rows = storage.purge_older_than(
+        signals=_iso(before(settings.signal_retention_days)),
+        inferred=_iso(before(settings.inferred_preference_retention_days)),
+        trio_feedback=_iso(before(settings.trio_feedback_retention_days)),
+    )
     report = RetentionReport(
         conversations=len(expired),
         log_lines=prune_jsonl(settings.log_path, cutoff),
-        payload_lines=prune_jsonl(settings.llm_payload_log_path, cutoff),
+        payload_lines=prune_jsonl(
+            settings.llm_payload_log_path, before(settings.payload_retention_days)
+        ),
         candidates=prune_candidates(candidates, cutoff) if candidates is not None else 0,
+        exports=prune_files(settings.exports_dir, before(settings.export_retention_days)),
+        **rows,
     )
     if any(report.as_dict().values()):
-        log_event(
-            "retention_purged", retention_days=settings.chat_retention_days, **report.as_dict()
-        )
+        log_event("retention_purged", **report.as_dict())
     return report
