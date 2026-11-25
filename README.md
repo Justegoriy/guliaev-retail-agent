@@ -37,7 +37,7 @@ fits easily in the free 1 TB per month) and a Gemini API key from
 [Google AI Studio](https://aistudio.google.com/apikey).
 
 ```bash
-git clone <this repository> && cd <repository folder>
+git clone https://github.com/Justegoriy/guliaev-retail-agent.git && cd guliaev-retail-agent
 python -m venv .venv
 # Windows:      .venv\Scripts\activate
 # macOS/Linux:  source .venv/bin/activate

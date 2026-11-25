@@ -706,7 +706,7 @@ preference_signals(id INTEGER PK, user_id, key, value JSON, weight REAL,
 - [x] Чистая установка в новом venv по README.
 - [x] Проверить, что в репозитории нет `.env`, ключей, `app.db`, логов.
 - [x] Финальная сверка по матрице покрытия ниже: каждый пункт `task.md` имеет реализацию/документ.
-- [ ] Публичный GitHub-репозиторий, push, CI зелёный.
+- [x] Публичный GitHub-репозиторий, push, CI зелёный: https://github.com/Justegoriy/guliaev-retail-agent (eval-gate ждёт секретов).
 
 ---
 
@@ -767,7 +767,7 @@ preference_signals(id INTEGER PK, user_id, key, value JSON, weight REAL,
 
 ### Что осталось открытым
 
-- [ ] Публичный GitHub-репозиторий, push, CI зелёный (шаг 13; ждём URL пустого репозитория).
+- [x] Публичный GitHub-репозиторий, push, CI зелёный: https://github.com/Justegoriy/guliaev-retail-agent (eval-gate ждёт секретов).
 - [x] Полный прогон eval (28 кейсов) на восстановленной квоте; обновить «Latest run» в technical design и README. Частичные прогоны 2026-11-24 после шага 14: `a8`, `a9`, `a10`, `a23`, `a25`, `a33`, `a34`, `a35` — PASS. → сделано в 15.4.
 - [x] Свежий реальный пример в README: менеджер спрашивает про чужой бренд (после 14.2). → сделано в 15.4.
 - [x] Golden Bucket и бренды: при одобрении кандидата без заметок аналитика его `report` = ответ агента (`knowledge/golden.py`, `approve`), с цифрами брендов автора. Закрыто в 15.1 (метод без цифр).
