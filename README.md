@@ -232,6 +232,10 @@ company-wide data.
 
 ## CLI commands
 
+You can also just ask the agent "What can you do?", "How do I work with you?" or "Which tools
+do you have?": it answers for your role and access, with example questions, the commands and
+the limits.
+
 ```text
 /help                         this help
 /reports                      your saved reports
@@ -341,7 +345,7 @@ notice. Nothing needs a manual approval: changes go live only through the gate.
 **Eval** against the real agent (Gemini + BigQuery):
 
 ```bash
-python evals/run_eval.py                        # all 28 cases
+python evals/run_eval.py                        # all 29 cases
 python evals/run_eval.py --only security        # one or more categories
 python evals/run_eval.py --case a2_top_categories --no-judge
 python evals/run_eval.py --gate --suite release  # quality gate: exit 0 passed, 1 failed, 3 inconclusive

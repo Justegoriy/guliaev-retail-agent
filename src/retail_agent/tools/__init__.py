@@ -2,7 +2,12 @@
 
 from langchain_core.tools import BaseTool
 
-from retail_agent.tools import data_tools, preference_tools, report_tools  # noqa: F401
+from retail_agent.tools import (  # noqa: F401
+    data_tools,
+    help_tools,
+    preference_tools,
+    report_tools,
+)
 from retail_agent.tools.registry import (
     REGISTRY,
     ExecutedQuery,

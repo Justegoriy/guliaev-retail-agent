@@ -50,7 +50,9 @@ BUDGET_ANSWER = (
     'Please ask a narrower question, or say "continue" to go on from here.'
 )
 # Turns that are not about the data get no precedents (saves an embedding call).
-NO_PRECEDENTS_CATEGORIES = frozenset({"greeting", "preferences", "report_management"})
+NO_PRECEDENTS_CATEGORIES = frozenset(
+    {"greeting", "about_assistant", "preferences", "report_management"}
+)
 # Turns without SQL that still get the post-turn extraction call, because the message may
 # reveal a preference ("shorter, please", "as a table?"). Turns with SQL always get it.
 SIGNAL_CATEGORIES = frozenset({"follow_up", "preferences"})

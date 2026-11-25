@@ -106,6 +106,7 @@ class ToolSpec:
     allowed_roles: frozenset[str] | None = None  # None = all roles
     side_effects: bool = False  # changes state outside the chat
     requires_confirmation: bool = False  # must ask the user through `safety.confirmation`
+    capability: str = ""  # one plain-language line for the user-facing help (describe_capabilities)
 
     def allows(self, user: UserContext) -> bool:
         return self.allowed_roles is None or user.role in self.allowed_roles

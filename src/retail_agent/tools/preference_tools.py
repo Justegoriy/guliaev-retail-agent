@@ -95,7 +95,17 @@ def _forget_user_preference(ctx: ToolContext) -> BaseTool:
 
 register(
     [
-        ToolSpec(name="update_user_preference", factory=_update_user_preference, side_effects=True),
-        ToolSpec(name="forget_user_preference", factory=_forget_user_preference, side_effects=True),
+        ToolSpec(
+            name="update_user_preference",
+            factory=_update_user_preference,
+            side_effects=True,
+            capability="Remember how you like answers: format, detail, focus metrics",
+        ),
+        ToolSpec(
+            name="forget_user_preference",
+            factory=_forget_user_preference,
+            side_effects=True,
+            capability="Forget a preference when you ask",
+        ),
     ]
 )

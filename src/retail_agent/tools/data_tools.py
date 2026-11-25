@@ -236,7 +236,16 @@ def _run_sql(ctx: ToolContext) -> BaseTool:
 
 register(
     [
-        ToolSpec(name="describe_dataset", factory=_describe_dataset),
-        ToolSpec(name="run_sql", factory=_run_sql),
+        ToolSpec(
+            name="describe_dataset",
+            factory=_describe_dataset,
+            capability="Describe the available data: tables, fields and the analyses they allow",
+        ),
+        ToolSpec(
+            name="run_sql",
+            factory=_run_sql,
+            capability="Answer questions about sales, orders, products and customers with "
+            "read-only queries, fixing a failed query by itself",
+        ),
     ]
 )

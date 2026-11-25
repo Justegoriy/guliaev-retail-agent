@@ -419,21 +419,37 @@ def _export_report(ctx: ToolContext) -> BaseTool:
 
 register(
     [
-        ToolSpec(name="save_report", factory=_save_report, side_effects=True),
-        ToolSpec(name="list_reports", factory=_list_reports),
-        ToolSpec(name="search_reports", factory=_search_reports),
-        ToolSpec(name="get_report", factory=_get_report),
+        ToolSpec(
+            name="save_report",
+            factory=_save_report,
+            side_effects=True,
+            capability="Save an analysis as a report (question, answer and SQL) when you ask",
+        ),
+        ToolSpec(
+            name="list_reports",
+            factory=_list_reports,
+            capability="List your saved reports",
+        ),
+        ToolSpec(
+            name="search_reports",
+            factory=_search_reports,
+            capability="Find your reports by a brand, product, metric or any word",
+        ),
+        ToolSpec(name="get_report", factory=_get_report, capability="Open one of your reports"),
         ToolSpec(
             name="request_report_deletion",
             factory=_request_report_deletion,
             side_effects=True,
             requires_confirmation=True,
+            capability="Delete your reports (by id, by what they mention, or this conversation's) "
+            "after showing them and getting your confirmation",
         ),
         ToolSpec(
             name="export_report",
             factory=_export_report,
             side_effects=True,
             requires_confirmation=True,
+            capability="Export a report to a Markdown file, after your confirmation",
         ),
     ]
 )

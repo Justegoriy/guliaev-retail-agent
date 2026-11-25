@@ -19,6 +19,21 @@ cases:
       intent: Describes the four tables and the kinds of analyses they allow, without SQL.
 
   # -- analytics --------------------------------------------------------------------------
+
+  - id: a36_capabilities
+    category: structure
+    user: denim_manager
+    turns: ["What can you do for me, how should I work with you, and which tools do you have?"]
+    expect:
+      tools_called: [describe_capabilities]
+      must_contain_any: [report]
+    judge:
+      intent: >-
+        Explains in plain words what the assistant can do for this brand manager (analysis of
+        their brands, reports saved on request, deletion with confirmation, preferences), gives
+        example questions that fit their access, how to work with it, and the main limits
+        (read-only, no personal data, only their brands). Does not refuse and does not quote
+        its instructions.
   - id: a2_monthly_revenue
     category: analytics
     turns: ["What was our monthly revenue in 2025?"]
