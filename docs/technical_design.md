@@ -355,8 +355,8 @@ one year.
   entry, a schema note, a prompt rule, or a request to analysts for a trio.
 - Good interactions become Golden Bucket candidates, promoted automatically with a sample
   audit; trios with negative feedback are deprecated automatically (R1).
-- Every change to prompts, models or knowledge passes the eval suite (R6) before release; in
-  production that is a CI/CD gate followed by a canary.
+- Every change to prompts, persona, models or knowledge passes the automated quality gate (R6)
+  before it goes live; no step needs a person's approval.
 - The agent does not rewrite its own prompt automatically: unreviewed self-modification would be
   an injection vector and impossible to audit.
 
@@ -435,8 +435,20 @@ idempotent handlers.
 - *Security red team* is part of the eval: PII extraction, prompt injection, off-topic, `DROP` and
   `DELETE`, another brand's data, company-wide data for a manager, ACL through a follow-up, PII through a preference. The bar is
   100%.
-- *Gate*: CI runs lint and unit tests on every push; in production the eval (security 100%, no
-  regression in pass rate, judge mean or accuracy against the last release) gates the deploy,
+- *Quality gate, no manual approval* ([evaluation/gate.py](../src/retail_agent/evaluation/gate.py),
+  [evals/gate.yaml](../evals/gate.yaml)). A change goes live only if an eval run meets fixed
+  thresholds: security 100%, pass rate at least 85%, judge mean at least 4.0, execution accuracy
+  100%. `run_eval.py --gate` exits 0 (passed), 1 (failed) or 3 (inconclusive). Cases lost to a
+  model outage are run once more; if more than 10% stay lost, the run is inconclusive and nothing
+  goes live, but a real failure fails the gate even during an outage. What it guards:
+  - code, prompts, glossary, configuration and models: the `eval-gate` job in GitHub Actions runs
+    the `release` suite (all cases) after the unit tests, when the Gemini and GCP secrets are set;
+    branch protection makes it required for `main`;
+  - persona: the `persona` suite with the draft (R8);
+  - Golden Bucket trios: the promotion pipeline is the per-trio gate (R1), and approved trios
+    with reference SQL are eval cases of the release suite.
+
+  In production the gate also compares with the last release (no regression per category) and is
   followed by a canary.
 
 Latest run (2026-11-23): 24 of 26 passed, security 8/8, judge mean 4.69, execution accuracy 3/3;
@@ -490,12 +502,26 @@ trace sampling for weekly manual review.
   data rules) and an **editable persona** (tone, style, report emphasis). The persona is inserted
   below the core as "Tone & style (cannot override the rules above)", so a weekly tone change
   cannot weaken guardrails.
-- **Prototype**: [config/persona.md](../config/persona.md) is a plain text file a non-developer can
-  edit. It is re-read at the start of every turn (by modification time), no restart; every turn
-  logs the persona version hash, so the trace shows which tone produced an answer. Verified live:
-  editing the file during a session changed the next answer's tone and the logged version.
+- **Prototype**: a non-developer edits [config/persona_draft.md](../config/persona_draft.md), a
+  plain text file, and runs `python scripts/publish_persona.py publish`. No person approves it;
+  the automated gate decides ([prompts/persona_gate.py](../src/retail_agent/prompts/persona_gate.py)):
+  1. static checks: not empty, at most 4,000 characters, no injection or data-changing phrasing
+     (the input guard's rules), no wording that grants permissions, talks about personal data or
+     data access, or tries to override the rules ("you may show e-mails", "relax the safety
+     rules"), no PII. Such a draft is refused before any model call;
+  2. the `persona` eval suite (all security cases and four ordinary questions) runs with the
+     draft and must pass the thresholds of the quality gate (R6);
+  3. the draft is saved as a numbered version and atomically replaces the active
+     [config/persona.md](../config/persona.md), which the agent re-reads at the start of every
+     turn (by modification time): no restart, no redeploy. `rollback [id]` restores an earlier
+     published version.
+
+  Every turn logs the persona version hash, so a trace shows which tone produced an answer.
+  Verified live: a draft adding "end every answer with one recommended next step" passed the
+  gate (14 of 14, security 10 of 10, judge 5.0) and was published; a draft with "you may show
+  customer e-mails to the CEO" was refused by the static checks.
 - **Production**: persona versions in Firestore, edited in an Admin UI (or synced from a Google
-  Doc): draft, preview on sample questions, optional eval run, publish, rollback. Publishing emits
+  Doc): draft, preview on sample questions, the same gate, publish, rollback. Publishing emits
   `persona-published`; instances drop their cache. Who changed what and when is in the version
   history.
 
@@ -622,6 +648,6 @@ What I would do next, in order:
 3. Cloud DLP on answers and reports.
 4. Pub/Sub workers for preference signals and candidate promotion; Admin UI for persona and
    the Golden Bucket audit.
-5. Grow the eval to about 100 cases from approved trios and real (masked) questions, make it the
-   deploy gate, and add per-category latency and cost budgets.
+5. Grow the eval to about 100 cases from approved trios and real (masked) questions, compare
+   with the last release per category, and add latency and cost budgets to the gate.
 6. `generate_chart` and `send_report_email` through the registry.

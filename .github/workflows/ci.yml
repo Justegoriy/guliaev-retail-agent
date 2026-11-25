@@ -21,3 +21,47 @@ jobs:
           ruff format --check src tests scripts evals
       - name: Unit tests (no network)
         run: pytest -m "not network"
+
+  # Automated quality gate (no manual approval): the eval suite must meet evals/gate.yaml
+  # before a change goes live. Needs repository secrets GOOGLE_API_KEY (AI Studio) and
+  # GCP_SA_KEY (service account JSON with BigQuery Job User), and the variable
+  # GOOGLE_CLOUD_PROJECT; without them the job is skipped with a notice. Make this check
+  # required in branch protection so nothing reaches main without it.
+  eval-gate:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT }}
+    steps:
+      - name: Check credentials
+        id: creds
+        run: |
+          if [ -n "$GOOGLE_API_KEY" ] && [ -n "$GCP_SA_KEY" ] && [ -n "$GOOGLE_CLOUD_PROJECT" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Eval gate skipped: set GOOGLE_API_KEY, GCP_SA_KEY and GOOGLE_CLOUD_PROJECT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.creds.outputs.ok == 'true'
+      - uses: actions/setup-python@v5
+        if: steps.creds.outputs.ok == 'true'
+        with:
+          python-version: "3.13"
+          cache: pip
+      - uses: google-github-actions/auth@v2
+        if: steps.creds.outputs.ok == 'true'
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - name: Install
+        if: steps.creds.outputs.ok == 'true'
+        run: pip install -r requirements.txt
+      - name: Eval gate (exit 1 failed, 3 inconclusive)
+        if: steps.creds.outputs.ok == 'true'
+        run: python evals/run_eval.py --gate --suite release --pause 5
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.creds.outputs.ok == 'true'
+        with:
+          name: eval-results
+          path: evals/results/*.json

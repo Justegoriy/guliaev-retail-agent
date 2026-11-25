@@ -25,6 +25,7 @@ from rich.text import Text
 from retail_agent import auth, health
 from retail_agent.console import tolerate_unencodable_output
 from retail_agent.evaluation.cases import CaseError, load_cases
+from retail_agent.evaluation.gate import evaluate, load_gate, unavailable
 from retail_agent.evaluation.runner import CaseResult, EvalEnv, JudgeVerdict, run_case
 from retail_agent.graph.builder import create_resources
 from retail_agent.llm import build_chat_model
@@ -44,6 +45,14 @@ def _args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--no-judge", action="store_true", help="skip the LLM judge")
     p.add_argument("--pause", type=float, default=2.0, help="seconds between cases")
     p.add_argument("--out", type=Path, default=EVALS / "results")
+    p.add_argument(
+        "--gate",
+        action="store_true",
+        help="apply the quality gate: exit 0 passed, 1 failed, 3 inconclusive (outage)",
+    )
+    p.add_argument("--suite", help="case suite from the gate config, e.g. release or persona")
+    p.add_argument("--gate-config", type=Path, default=EVALS / "gate.yaml")
+    p.add_argument("--persona", type=Path, help="persona file to test instead of the active one")
     return p.parse_args(argv)
 
 
@@ -143,6 +152,12 @@ def main(argv: list[str] | None = None) -> int:
     except CaseError as exc:
         console.print(f"[red]Invalid cases: {exc}[/red]")
         return 2
+    gate_config = load_gate(args.gate_config) if (args.gate or args.suite) else None
+    if args.suite:
+        if args.suite not in gate_config.suites:
+            console.print(f"[red]Unknown suite {args.suite!r}; see {args.gate_config.name}[/red]")
+            return 2
+        cases = gate_config.suites[args.suite].select(cases)
     only = {c for item in args.only for c in item.split(",") if c}
     cases = [
         c
@@ -163,6 +178,7 @@ def main(argv: list[str] | None = None) -> int:
             "log_path": run_dir / "agent.jsonl",
             "golden_candidates_path": run_dir / "golden_candidates.jsonl",
             "exports_dir": run_dir / "exports",
+            **({"persona_path": args.persona.resolve()} if args.persona else {}),
         }
     )
     logger.configure(settings.log_path)
@@ -191,6 +207,16 @@ def main(argv: list[str] | None = None) -> int:
         if i < len(cases):
             time.sleep(args.pause)
 
+    if args.gate:
+        # A case lost to a model outage says nothing about the change: run it once more.
+        for i, result in enumerate(results):
+            if unavailable(result):
+                case = next(c for c in cases if c.id == result.id)
+                console.print(f"[retry] {case.id} (model was unavailable)...", end=" ")
+                time.sleep(max(args.pause, 10))
+                results[i] = run_case(case, env)
+                console.print("[green]PASS[/green]" if results[i].passed else "[red]FAIL[/red]")
+
     summary = _summary(results, settings.llm_payload_log_path)
     _render(results, summary)
     out = args.out / f"{stamp}.json"
@@ -203,7 +229,8 @@ def main(argv: list[str] | None = None) -> int:
             "aux": settings.gemini_aux_model,
             "judge": None if args.no_judge else settings.gemini_model,
         },
-        "filters": {"only": sorted(only), "case": args.case},
+        "filters": {"only": sorted(only), "case": args.case, "suite": args.suite},
+        "persona": str(args.persona) if args.persona else None,
         "summary": summary,
         "cases": [r.to_dict() for r in results],
     }
@@ -211,6 +238,17 @@ def main(argv: list[str] | None = None) -> int:
     console.print(
         f"Saved {out.relative_to(PROJECT_ROOT)} (run data: {run_dir.relative_to(PROJECT_ROOT)})"
     )
+    if args.gate:
+        gate = evaluate(results, gate_config.thresholds)
+        payload["gate"] = {"result": gate.label, "reasons": gate.reasons, **gate.metrics}
+        out.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+        )
+        colour = {"PASSED": "green", "FAILED": "red", "INCONCLUSIVE": "yellow"}[gate.label]
+        console.print(f"[bold {colour}]Quality gate: {gate.label}[/bold {colour}]")
+        for reason in gate.reasons:
+            console.print(f"  - {reason}")
+        return gate.code
     security = summary["by_category"].get("security")
     return 1 if security and security["passed"] < security["total"] else 0
 

@@ -57,6 +57,7 @@ from retail_agent.personalization.profile import (
     Preferences,
     UserProfile,
 )
+from retail_agent.prompts.context import PromptSources, ReloadingFile, persona_text
 from retail_agent.safety import pii
 from retail_agent.settings import Settings
 from retail_agent.tools import ToolContext, build_tools
@@ -547,6 +548,9 @@ class AgentResources:
             agent_model=build_chat_model("main", tools, settings=self.settings),
             answer_model=build_chat_model("main", settings=self.settings),
             settings=self.settings,
+            prompt_sources=PromptSources(
+                persona=ReloadingFile(self.settings.persona_path, "persona", persona_text)
+            ),
             aux=self.aux,
             golden=self.golden,
             candidates=self.candidates,

@@ -1,8 +1,8 @@
-# Persona: tone and style of the analyst
+# Active persona: tone and style of the analyst
 #
-# This file is re-read at the start of every turn: edits apply to the next answer
-# without a restart. It sets tone and style only; safety and data rules are fixed
-# in code and cannot be changed here. Lines starting with "#" are ignored.
+# Do not edit by hand: this file is written by `scripts/publish_persona.py` from
+# config/persona_draft.md after the draft passes the quality gate. The agent re-reads it
+# at the start of every turn. Lines starting with "#" are ignored.
 
 You are a senior retail data analyst briefing busy executives.
 

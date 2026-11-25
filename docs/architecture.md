@@ -340,7 +340,9 @@ flowchart LR
 
         LOGS[(Logs and traces<br/>BigQuery sink)] --> FR[Failure report<br/>SQL errors by type, exhausted retries,<br/>guard blocks, 👎, repeated questions]
         FR --> FIX[Prompt / glossary / schema notes / new trios]
-        FIX --> EVALG{Eval gate<br/>security 100%, no regressions}
+        FIX --> EVALG{Automated eval gate<br/>security 100%, pass rate, judge, accuracy<br/>no manual approval}
+        PERS[Persona draft] --> PCHK[Static checks] --> EVALG
+        EVALG -->|pass| PUB[Publish persona version]
         EVALG -->|pass| DEPLOY[Canary rollout]
         EVALG -->|fail| FIX
         GB -->|approved trios with reference SQL| EVALG

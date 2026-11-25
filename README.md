@@ -310,9 +310,10 @@ are in [docs/technical_design.md](docs/technical_design.md)):
 Also implemented, in simplified form: the Golden Bucket (15 analyst trios, embeddings retrieval,
 `/good` candidates promoted automatically with `scripts/promote_candidates.py`, audited with
 `scripts/review_candidates.py`), user preferences (explicit and
-learned from behaviour), persona in [config/persona.md](config/persona.md) (edit it during a
-session: the next answer uses it), chat history with `/resume`, the eval suite and the failure
-report.
+learned from behaviour), the persona (edit [config/persona_draft.md](config/persona_draft.md) and
+run `python scripts/publish_persona.py publish`: it goes live, without a restart, only if it passes
+the automated quality gate), chat history with `/resume`, the eval suite with its gate
+(`python evals/run_eval.py --gate`) and the failure report.
 
 ## Tests and evaluation
 
@@ -331,6 +332,7 @@ on every push.
 python evals/run_eval.py                        # all 28 cases
 python evals/run_eval.py --only security        # one or more categories
 python evals/run_eval.py --case a2_top_categories --no-judge
+python evals/run_eval.py --gate --suite release  # quality gate: exit 0 passed, 1 failed, 3 inconclusive
 ```
 
 Cases are in [evals/cases.yaml](evals/cases.yaml): structure, analytics, report, security,
@@ -378,7 +380,8 @@ each one. The ones you are most likely to change:
 | `INPUT_GUARD_LLM` | `true` | Use the classifier in addition to rules |
 | `LOG_LLM_PAYLOADS` | `true` | Write full model conversations for `/trace --full` |
 
-Non-developer settings live in [config/](config/): `persona.md` (tone, re-read every turn),
+Non-developer settings live in [config/](config/): `persona_draft.md` (tone; published through
+the quality gate into `persona.md`, which is re-read every turn),
 `glossary.yaml` (metric definitions), `users.yaml` (users and their brands), `pii_policy.yaml`
 (personal fields and patterns), `preferences.yaml` (allowed preference keys and thresholds).
 

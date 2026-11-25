@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     golden_index_path: Path = Path("data/golden_index.npz")
     golden_candidates_path: Path = Path("data/golden_candidates.jsonl")
 
+    # Persona: the active file the agent reads every turn (published through the gate)
+    persona_path: Path = Path("config/persona.md")
+
     # User preferences (keys, values, thresholds)
     preferences_config_path: Path = Path("config/preferences.yaml")
 
@@ -100,6 +103,7 @@ class Settings(BaseSettings):
         "golden_candidates_path",
         "preferences_config_path",
         "dev_jwt_secret_path",
+        "persona_path",
     )
     @classmethod
     def _resolve_path(cls, value: Path) -> Path:

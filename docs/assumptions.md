@@ -40,7 +40,7 @@ comments and the other documents.
 |---|---|
 | D15 | The Golden Bucket is "theoretical" in the assignment, so the prototype has a synthetic seed of 15 trios ([data/golden_trios.json](../data/golden_trios.json)) with embeddings retrieval, and updates through `/good` candidates plus analyst review. The full pipeline is in the HLD |
 | D16 | User preferences are implemented fully in the prototype (explicit and inferred) |
-| D17 | Persona is a text file re-read every turn, global for all users. Preferences take priority for format, the persona sets the tone; guardrails are in the immutable core |
+| D17 | Persona is a text file, global for all users: a non-developer edits `config/persona_draft.md` and publishes it with `scripts/publish_persona.py`, which runs the quality gate (D29) and then replaces the active `config/persona.md`; the agent re-reads it every turn, no redeploy. Versions and rollback. Preferences take priority for format, the persona sets the tone; guardrails are in the immutable core |
 | D18 | **Models** (confirmed by OpsFleet: newer Gemini, free AI Studio key, 2-5 LLM calls per question, fallback between Gemini models): `gemini-3.8-flash` main, `gemini-3.5-flash-lite` for fallback and auxiliary calls (guard, extraction, summaries, eval judge), `gemini-embedding-001`; all configurable in `.env`. At most `MAX_LLM_CALLS_PER_TURN` = 5 model calls per question (input guard, up to 3 agent steps, one post-turn call); the last agent step allowed has no tools and must answer. Retries of a failed call and the switch to the fallback model are not counted as extra calls. Free-tier limits (not guaranteed by Google) are roughly Flash 5 RPM / 20 RPD and Flash-Lite 15 RPM / 500 RPD, counted per model: once Flash's daily quota is used up, the agent continues on Flash-Lite |
 | D19 | **Sizing** (confirmed by OpsFleet): tens to a few hundred executives, a few active at once, about 100 active managers a day with about 10 questions each. Targets: 10-30 s for a simple question, 1-2 minutes for a long report; 99.5% availability (our assumption). Estimates in [architecture.md](architecture.md) |
 | D20 | The reviewer uses their own GCP project for BigQuery billing (`GOOGLE_CLOUD_PROJECT`) and their own AI Studio key |
@@ -50,8 +50,11 @@ comments and the other documents.
 | D24 | Business metric definitions (revenue, AOV, margin, return rate, active customer, repeat customer, churn, new customer) are in [config/glossary.yaml](../config/glossary.yaml); the agent states the definition it used |
 | D25 | "Now" for relative periods ("last month") is the system date. If there is no data for a period, the agent says so and shows the available range. The public dataset is refreshed daily |
 | D26 | One user per CLI process. In the web app each browser tab picks a user; data is isolated per user as in the CLI |
-| D27 | Tests with `pytest`, lint with `ruff`, GitHub Actions run both (without network) on every push |
+| D27 | Tests with `pytest`, lint with `ruff`; GitHub Actions run both on every push, then the eval gate (D29) when the Gemini and GCP secrets are configured |
 | D28 | A demo web interface (Streamlit, localhost only) in addition to the CLI, using the same agent core; sign-in as in D4 |
+
+| D29 | **Automated quality gate, no manual approval** (confirmed by OpsFleet). A change goes live only if the eval run meets [evals/gate.yaml](../evals/gate.yaml): security 100%, pass rate at least 85%, judge mean at least 4.0, execution accuracy 100%. Code, prompts, glossary, configuration and models: the `release` suite in CI. Persona: the `persona` suite with the draft. Golden Bucket trios: the promotion pipeline (D30). A run where the model was unavailable for more than 10% of cases is inconclusive: nothing goes live |
+| D30 | **Golden Bucket updates are automatic** (confirmed by OpsFleet: human review does not scale). Candidates from 👍 answers are promoted by checks (SQL under the author's scope, duplicates, an LLM judge, a number-leak check); unsure ones are quarantined; 20% of approved trios are sampled for a human audit; trios with 👎 from two or more users (and more 👎 than 👍) are deprecated automatically |
 
 Revenue and order definitions used throughout: a "sale" is an order item whose status is not
 `Cancelled` or `Returned`; revenue is the sum of `sale_price` over sales; return rate is returned
