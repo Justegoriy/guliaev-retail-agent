@@ -430,7 +430,7 @@ idempotent handlers.
 
 **Before deployment.**
 
-- *Unit tests* (613, no network): SQL Guard and PII bypasses, ACL rewrite, masking, confirmation
+- *Unit tests* (669, no network): SQL Guard and PII bypasses, ACL rewrite, masking, confirmation
   flow (including "yes" in the chat not confirming and a changed set being refused), history and
   summarization, preferences, retries and fallbacks, CLI, web app. 21 network tests run against
   real Gemini and BigQuery on demand (`pytest -m network`).
@@ -466,8 +466,10 @@ idempotent handlers.
   In production the gate also compares with the last release (no regression per category) and is
   followed by a canary.
 
-Latest run (2026-11-23): 24 of 26 passed, security 8/8, judge mean 4.69, execution accuracy 3/3;
-the two failures were analysed and fixed, and pass on re-run.
+Latest run (2026-11-25, [evals/results/20261125-094403.json](../evals/results/20261125-094403.json),
+`--gate --suite release`): 28 of 28 passed, security 10 of 10, judge mean 4.93, execution
+accuracy 3 of 3, quality gate PASSED; 137 model calls, 443k input and 23k output tokens. Flash's
+free daily quota ran out after three calls, so the run is mostly on Flash-Lite (the fallback).
 
 **Does a report answer the user's intent?** The prompt requires stating the definitions and
 assumptions used (Methodology & assumptions section in reports); the judge compares the question,
@@ -647,12 +649,15 @@ Limitations:
 - PII masking is regex-based (no DLP); an unusual PII format in free text could be missed by layer 3
   (layers 1 and 2 do not depend on it).
 - SQLite and in-process caches and rate limiters: a single process, not shared between instances.
+- Retention and Golden Bucket promotion run when invoked (at start, by a script), not on a
+  schedule; production uses Firestore TTL policies and a Pub/Sub worker.
+- No minimum group size for aggregates (D7, E9).
 - The Golden Bucket is a 15-trio JSON file with an in-memory index; promotion runs on demand
   (`scripts/promote_candidates.py`), not on every new candidate.
 - No charts (D22), no e-mail; reports are markdown only.
 - The free-tier Gemini quota (about 20 requests per day for Flash) is easily exhausted; the agent
   then works on Flash-Lite, with lower quality on complex multi-step questions. The latest eval
-  ran entirely on Flash-Lite because Flash returned 503/504 for the whole run.
+  ran almost entirely on Flash-Lite because Flash's free daily quota was used up.
 - English only (D21).
 
 What I would do next, in order:

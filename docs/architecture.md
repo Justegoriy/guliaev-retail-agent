@@ -427,7 +427,7 @@ flowchart LR
         P8[golden_trios.json +<br/>numpy embeddings index]
         P9[golden_candidates.jsonl +<br/>promote_candidates.py, audit script]
         P10[In-process rate limiter, caches]
-        P11[config/persona.md,<br/>re-read every turn]
+        P11[persona_draft.md -> gate -><br/>persona.md, re-read every turn]
         P12[logs/agent.jsonl +<br/>llm_payloads.jsonl + LangSmith]
         P13[Post-turn extraction<br/>in the same process]
         P14[evals/run_eval.py,<br/>failure_report.py, GitHub Actions]
