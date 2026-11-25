@@ -74,7 +74,7 @@ items over items that were not cancelled.
 
 ## Answers from OpsFleet
 
-The client answered two rounds of questions; the assumptions above are updated and marked
+The client answered three rounds of questions; the assumptions above are updated and marked
 "confirmed by OpsFleet".
 
 - 2026-11-24: access by brand (D1-D3), nothing outside the user's brands (D2), PII and attributes

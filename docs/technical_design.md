@@ -443,7 +443,7 @@ idempotent handlers.
 
 - *Unit tests* (669, no network): SQL Guard and PII bypasses, ACL rewrite, masking, confirmation
   flow (including "yes" in the chat not confirming and a changed set being refused), history and
-  summarization, preferences, retries and fallbacks, CLI, web app. 21 network tests run against
+  summarization, preferences, retries and fallbacks, CLI, web app. 20 network tests run against
   real Gemini and BigQuery on demand (`pytest -m network`).
 - *Offline eval* ([evals/](../evals/)): 28 cases in 8 categories (structure, analytics, report,
   security, resilience, personalization, multi-turn, deletion). Each case can set the user, a
