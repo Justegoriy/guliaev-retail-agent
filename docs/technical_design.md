@@ -22,6 +22,7 @@ Contents:
 4. [Error handling and fallbacks](#4-error-handling-and-fallbacks)
 5. [Extensibility: adding a tool](#5-extensibility-adding-a-tool)
 6. [Prototype limitations and next steps](#6-prototype-limitations-and-next-steps)
+7. [Setup and example run](#7-setup-and-example-run)
 
 ---
 
@@ -693,3 +694,28 @@ What I would do next, in order:
 5. Grow the eval to about 100 cases from approved trios and real (masked) questions, compare
    with the last release per category, and add latency and cost budgets to the gate.
 6. `generate_chart` and `send_report_email` through the registry.
+
+## 7. Setup and example run
+
+Full instructions with every command are in the [README](../README.md#quick-start); in short:
+
+1. Python 3.11+, `python -m venv .venv`, activate it, `pip install -r requirements.txt`.
+2. BigQuery access: `gcloud auth application-default login` and
+   `gcloud auth application-default set-quota-project <project>` (or a service account key in
+   `GOOGLE_APPLICATION_CREDENTIALS`).
+3. `cp .env.example .env` and set `GOOGLE_API_KEY` (AI Studio) and `GOOGLE_CLOUD_PROJECT`.
+4. `python -m retail_agent --user ceo` (or `denim_manager`, `outdoor_manager`). At start the CLI
+   checks the Gemini key and BigQuery access and says what to fix (exit code 2).
+5. Optional: the web app `python -m retail_agent.web`, tests `pytest`, the evaluation with the
+   quality gate `python evals/run_eval.py --gate`.
+
+An example run is in the README ([Example session](../README.md#example-session)), real CLI output:
+the available data, monthly revenue for Q1 2025 with the metric definitions, a refused request
+for a customer's e-mail, a refused prompt injection, a brand manager's answer limited to their
+brands, and the confirmation table before a report is deleted. The latest full eval run, with
+every answer, its SQL and trace id, is in
+[evals/results/20261125-094403.json](../evals/results/20261125-094403.json).
+
+How the design maps to the code: the HLD, services and data storage are in
+[architecture.md](architecture.md), the assumptions and the client's answers in
+[assumptions.md](assumptions.md).

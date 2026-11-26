@@ -529,3 +529,9 @@ handlers are idempotent by `event_id`.
 
 The user's turn never waits for a Pub/Sub consumer: if the workers are down, answers continue
 and learning catches up when they recover.
+
+---
+
+How each requirement is solved, the error handling and fallbacks, extensibility, the prototype's
+limitations and the setup are in the [technical design](technical_design.md); the assumptions and
+the client's answers are in [assumptions.md](assumptions.md).
